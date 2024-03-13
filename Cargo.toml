@@ -1,0 +1,23 @@
+workspace = { members = ["cli"] }
+[package]
+name = "kedojs"
+version = "0.0.1"
+authors = ["Kedo authors <ing.sys.kevincaicedo@gmail.com>"]
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+boa_engine = "0.18.0"
+boa_runtime = "0.18.0"
+boa_gc = "0.18.0"
+boa_parser = "0.18.0"
+tokio = { version = "1", features = ["full"] }
+hyper = { version = "1", features = ["full"] }
+http-body-util = "0.1"
+hyper-util = { version = "0.1", features = ["full"] }
+serde = "1.0"
+serde_json = "1.0"

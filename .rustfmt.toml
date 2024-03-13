@@ -1,0 +1,6 @@
+max_width = 90
+tab_spaces = 2
+edition = "2021"
+error_on_line_overflow = true
+error_on_unformatted = true
+version = "Two"
