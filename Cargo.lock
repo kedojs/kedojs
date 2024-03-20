@@ -769,6 +769,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "rustc-hash",
  "serde",
  "serde_json",
  "tokio",

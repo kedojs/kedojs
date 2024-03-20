@@ -4,6 +4,7 @@ mod file;
 mod timer;
 mod util;
 mod http;
+mod es_module;
 
 pub mod kedo;
 

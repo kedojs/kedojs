@@ -7,11 +7,12 @@ use boa_engine::builtins::promise::PromiseState;
 use boa_engine::context::{ContextBuilder, HostHooks};
 use boa_engine::realm::Realm;
 use boa_engine::{js_string, property::Attribute, Context, JsResult, JsValue, Source};
-use boa_engine::{JsError, JsNativeError, JsString, Module, NativeFunction};
+use boa_engine::{JsError, JsNativeError, JsObject, JsString, Module, NativeFunction};
 use boa_runtime::Console;
 
 use crate::file::FileSystem;
 use crate::file_dir::KedoDirEntry;
+use crate::http;
 use crate::timer::{Timer, TimerQueue};
 
 struct Hooks;
@@ -38,7 +39,7 @@ impl HostHooks for Hooks {
     _operation: boa_engine::builtins::promise::OperationType,
     _context: &mut Context,
   ) {
-    println!("Promise rejection tracker");
+    todo!("Implement onRejectionHandled and onUnhandledRejection hooks");
   }
 }
 
@@ -62,11 +63,6 @@ impl KedoContext {
       .build()
       .expect("Failed to create context");
 
-    // let source = Source::from_reader(MODULE_SRC.as_bytes(), Some(Path::new("./main.mjs")));
-
-    // Can also pass a `Some(realm)` if you need to execute the module in another realm.
-    // let module = Module::parse(source, None, context)?;
-
     let timers = Rc::new(RefCell::new(TimerQueue::new()));
     Self {
       context,
@@ -75,15 +71,12 @@ impl KedoContext {
     }
   }
 
-  pub fn evaluate(
-    &mut self,
-    path: PathBuf,
-  ) -> JsResult<JsValue> {
+  pub fn evaluate(&mut self, path: PathBuf) -> JsResult<JsValue> {
     let source = match Source::from_filepath(&path) {
-        Ok(src) => src,
-        Err(e) => {
-            return Err(JsNativeError::typ().with_message(e.to_string()).into());
-        }
+      Ok(src) => src,
+      Err(e) => {
+        return Err(JsNativeError::typ().with_message(e.to_string()).into());
+      }
     };
 
     let module = Module::parse(source, None, &mut self.context)?;
@@ -134,15 +127,24 @@ impl KedoContext {
 
     // Checking if the final promise didn't return an error.
     match promise_result.state() {
-        PromiseState::Pending => return Err(JsNativeError::typ()
-        .with_message("Module didn't execute!")
-        .into()),
-        PromiseState::Fulfilled(v) => {
-            assert_eq!(v, JsValue::undefined());
-        }
-        PromiseState::Rejected(err) => {
-            return Err(JsError::from_opaque(err).try_native(&mut self.context).unwrap().into())
-        }
+      PromiseState::Pending => {
+        return Err(
+          JsNativeError::typ()
+            .with_message("Module didn't execute!")
+            .into(),
+        )
+      }
+      PromiseState::Fulfilled(v) => {
+        assert_eq!(v, JsValue::undefined());
+      }
+      PromiseState::Rejected(err) => {
+        return Err(
+          JsError::from_opaque(err)
+            .try_native(&mut self.context)
+            .unwrap()
+            .into(),
+        )
+      }
     }
 
     let namespace = module.namespace(&mut self.context);
@@ -157,7 +159,6 @@ impl KedoContext {
   }
 
   pub fn check_pending_jobs(&mut self, cx: &mut std::task::Context) -> Poll<()> {
-    // print!("Start Event Loop\n");
     let result = self.timers.borrow_mut().poll_timers(cx, &mut self.context);
     self.context.run_jobs();
 
@@ -179,12 +180,15 @@ impl KedoContext {
   }
 
   fn register_global(&mut self) {
+    let kedo_object = JsObject::with_object_proto(self.context.intrinsics());
+
     Timer::register_timers(&mut self.context, self.timers.clone());
-    let file = FileSystem::init(&mut self.context);
+    http::init_with_object(&mut self.context, &kedo_object).unwrap();
+    FileSystem::init_with_object(&mut self.context, &kedo_object).unwrap();
 
     self
       .context
-      .register_global_property(js_string!(Self::NAME), file, Attribute::all())
+      .register_global_property(js_string!(Self::NAME), kedo_object, Attribute::all())
       .expect("the file builtin shouldn't exist");
 
     self

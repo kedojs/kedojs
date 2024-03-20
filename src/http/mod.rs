@@ -1,20 +1,24 @@
-// use bytes::Bytes;
+use boa_engine::job::NativeJob;
+use boa_engine::object::builtins::JsPromise;
+use boa_engine::object::{FunctionObjectBuilder, ObjectInitializer};
+use boa_engine::property::PropertyDescriptor;
+use boa_engine::{js_string, Context, JsObject, JsResult, JsValue};
 use http_body_util::{BodyExt, Empty};
-use hyper::{
-  body::Bytes,
-  Request,
-};
+use hyper::body::Buf;
+use hyper::{body::Bytes, Request};
 use hyper_util::rt::TokioIo;
-// use serde::Deserialize;
-use tokio::io::{self, AsyncWriteExt as _};
 use tokio::net::TcpStream;
 
-async fn fetch(url: &str) -> Result<(), Box<dyn std::error::Error>> {
+use crate::util::{js_function, promise_method};
+
+pub async fn fetch_json_evt(
+  url: &str,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
   // Parse our URL...
   let url = url.parse::<hyper::Uri>()?;
 
   // Get the host and the port
-  let host = url.host().expect("uri has no host");
+  let host = url.host().unwrap();
   let port = url.port_u16().unwrap_or(80);
 
   let address = format!("{}:{}", host, port);
@@ -42,22 +46,71 @@ async fn fetch(url: &str) -> Result<(), Box<dyn std::error::Error>> {
   // Create an HTTP request with an empty body and a HOST header
   let req = Request::builder()
     .uri(url)
+    .method(hyper::Method::GET)
     .header(hyper::header::HOST, authority.as_str())
     .body(Empty::<Bytes>::new())?;
 
   // Await the response...
-  let mut res = sender.send_request(req).await?;
+  let res = sender.send_request(req).await?;
 
-  // println!("Response status: {}", res.status());
+  // asynchronously aggregate the chunks of the body
+  let body = res.collect().await?.aggregate();
 
-  // And read the response body
-  // Stream the body, writing each frame to stdout as it arrives
-  while let Some(next) = res.frame().await {
-    let frame = next?;
-    if let Some(chunk) = frame.data_ref() {
-      io::stdout().write_all(chunk).await?;
-    }
-  }
+  // try to parse as json with serde_json
+  let res_json = serde_json::from_reader(body.reader())?;
 
-  Ok(())
+  Ok(res_json)
+}
+
+#[allow(dead_code)]
+pub fn init(context: &mut Context) -> JsObject {
+  ObjectInitializer::new(context)
+    .function(promise_method(fetch_json), js_string!("fetch"), 1)
+    .build()
+}
+
+pub fn init_with_object(context: &mut Context, object: &JsObject) -> JsResult<bool> {
+  let function_fetch_json = js_function(context, promise_method(fetch_json), "fetch", 1);
+
+  object.define_property_or_throw(
+    js_string!("fetch"),
+    PropertyDescriptor::builder()
+      .value(function_fetch_json)
+      .writable(true)
+      .enumerable(false)
+      .configurable(true),
+    context,
+  )
+}
+
+fn fetch_json(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsPromise {
+  let url = args
+    .get(0)
+    .expect("No url argument provided")
+    .to_string(context)
+    .unwrap()
+    .to_std_string_escaped();
+
+  let (promise, resolvers) = JsPromise::new_pending(context);
+
+  let future = async move {
+    let result = fetch_json_evt(&url).await;
+
+    NativeJob::new(move |context| match result {
+      Ok(entries) => {
+        let json = JsValue::from_json(&entries, context).unwrap();
+
+        resolvers
+          .resolve
+          .call(&JsValue::undefined(), &[json], context)
+      }
+      Err(_e) => resolvers.reject.call(&JsValue::undefined(), &[], context),
+    })
+  };
+
+  context
+    .job_queue()
+    .enqueue_future_job(Box::pin(future), context);
+
+  promise
 }

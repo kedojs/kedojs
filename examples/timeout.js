@@ -2,6 +2,8 @@
 
 // console.log('Sum: ', sum(1, 2));
 
+console.log(JSON.parse('{"name": "Kevin"}'));
+
 const id = setTimeout(() => {
     console.log('Hello, world! Timeout: 1');
 }, 1000);
@@ -20,18 +22,18 @@ const id2 = setTimeout((name, age) => {
     console.log('Hello, world! Timeout: 6: ', name, age);
     clearInterval(interval);
 
-    // Kedo.readFile('./examples/data.txt').then((data) => {
-    //     console.log(data);
-    //     setTimeout(() => {
-    //         console.log('KedoJS 8');
-    //         setTimeout(() => {
-    //             console.log('KedoJS 9');
-    //             setTimeout(() => {
-    //                 console.log('KedoJS 10');
-    //             }, 1000);
-    //         }, 1000);
-    //     }, 1000);
-    // });
+    Kedo.readFile('./examples/data.txt').then((data) => {
+        console.log(data);
+        setTimeout(() => {
+            console.log('KedoJS 8');
+            setTimeout(() => {
+                console.log('KedoJS 9');
+                setTimeout(() => {
+                    console.log('KedoJS 10');
+                }, 1000);
+            }, 1000);
+        }, 1000);
+    });
 
     console.log('Hello, world! setTimeout Id Interval: ', interval);
 
