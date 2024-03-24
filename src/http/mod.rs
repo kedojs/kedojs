@@ -1,19 +1,27 @@
+use async_stream::stream;
 use boa_engine::job::NativeJob;
 use boa_engine::object::builtins::JsPromise;
-use boa_engine::object::{FunctionObjectBuilder, ObjectInitializer};
+use boa_engine::object::ObjectInitializer;
 use boa_engine::property::PropertyDescriptor;
 use boa_engine::{js_string, Context, JsObject, JsResult, JsValue};
 use http_body_util::{BodyExt, Empty};
-use hyper::body::Buf;
 use hyper::{body::Bytes, Request};
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpStream;
 
+pub mod headers;
+mod response;
+mod server;
+
 use crate::util::{js_function, promise_method};
+
+use self::headers::Headers;
+use self::response::{FetchResponse, ReadableBytesStream, ReadableStream};
 
 pub async fn fetch_json_evt(
   url: &str,
-) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+) -> Result<FetchResponse, Box<dyn std::error::Error>> {
+  let url_str = url.to_string();
   // Parse our URL...
   let url = url.parse::<hyper::Uri>()?;
 
@@ -52,14 +60,28 @@ pub async fn fetch_json_evt(
 
   // Await the response...
   let res = sender.send_request(req).await?;
+  let status = res.status().as_u16();
+  let ok = res.status().is_success();
+  let headers = Headers::from(res.headers().clone());
+  let status_text = res.status().canonical_reason().unwrap_or("").to_string();
+  // let url = res.
 
+  // res.collect()
+  let readable_stream = ReadableBytesStream::new(res.into_body());
+  let response = FetchResponse::new(
+    ReadableStream::new(readable_stream),
+    status,
+    ok,
+    headers,
+    status_text,
+    url_str,
+  );
+  Ok(response)
   // asynchronously aggregate the chunks of the body
-  let body = res.collect().await?.aggregate();
-
+  // let body = res.collect().await?.aggregate();
   // try to parse as json with serde_json
-  let res_json = serde_json::from_reader(body.reader())?;
-
-  Ok(res_json)
+  // let res_json = serde_json::from_reader(body.reader())?;
+  // Ok(res_json)
 }
 
 #[allow(dead_code)]
@@ -97,12 +119,14 @@ fn fetch_json(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsPro
     let result = fetch_json_evt(&url).await;
 
     NativeJob::new(move |context| match result {
-      Ok(entries) => {
-        let json = JsValue::from_json(&entries, context).unwrap();
+      Ok(response) => {
+        // let json = JsValue::from_json(&entries, context).unwrap();
 
+        let res = FetchResponse::to_object(response, context)?;
         resolvers
           .resolve
-          .call(&JsValue::undefined(), &[json], context)
+          .call(&JsValue::undefined(), &[res], context)
+        // todo!("Implement resolve")
       }
       Err(_e) => resolvers.reject.call(&JsValue::undefined(), &[], context),
     })

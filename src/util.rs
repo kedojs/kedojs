@@ -6,8 +6,15 @@ use boa_engine::{
   },
   Context, JsResult, JsValue, NativeFunction,
 };
-use std::io;
+use std::{cell::RefCell, io, rc::Rc};
 use tokio::task::spawn_blocking;
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum PropertyNameKind {
+    Key,
+    Value,
+    KeyAndValue,
+}
 
 pub async fn asyncify<F, T>(f: F) -> io::Result<T>
 where
@@ -36,6 +43,21 @@ pub fn async_method<
     })
   }
 }
+
+// pub fn async_method_with_state<
+//   Fut: std::future::IntoFuture<Output = JsResult<JsValue>> + 'static, T: 'static,
+// >(
+//   f: fn(&JsValue, &[JsValue], &mut T, &mut Context) -> Fut,
+//   state: Rc<RefCell<T>>,
+// ) -> NativeFunction {
+//   // SAFETY: `File` doesn't contain types that need tracing.
+//   unsafe {
+//     NativeFunction::from_closure(move |this, args, context| {
+//       let future = f(this, args, &mut state.borrow_mut(), context);
+//       Ok(JsPromise::from_future(future, context).into())
+//     })
+//   }
+// }
 
 pub fn promise_method(
   f: fn(&JsValue, &[JsValue], &mut Context) -> JsPromise,

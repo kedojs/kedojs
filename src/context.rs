@@ -13,6 +13,7 @@ use boa_runtime::Console;
 use crate::file::FileSystem;
 use crate::file_dir::KedoDirEntry;
 use crate::http;
+use crate::http::headers::Headers;
 use crate::timer::{Timer, TimerQueue};
 
 struct Hooks;
@@ -195,5 +196,9 @@ impl KedoContext {
       .context
       .register_global_class::<KedoDirEntry>()
       .expect("the KedoDirEntry builtin shouldn't exist");
+    self
+      .context
+      .register_global_class::<Headers>()
+      .expect("the Timer builtin shouldn't exist");
   }
 }

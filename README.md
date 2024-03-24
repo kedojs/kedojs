@@ -17,7 +17,14 @@ brew install kedo
 
 ```javascript
 // myscript.js
-const content = Kedo.readFileSync('./examples/data.txt');
+const response = await Kedo.fetch("https://jsonplaceholder.typicode.com/todos/1")
+
+console.log(response.title);
+
+Kedo.writeFileSync("todos.json", JSON.stringify(response));
+
+const content = Kedo.readFileSync('./todos.json');
+
 console.log(content);
 
 setTimeout(() => {
@@ -48,7 +55,9 @@ Roadmap to v0.1.0
     - [ ] mkdirSync
 - [x] Console API
 - [ ] HTTP Server
+    - [ ] serve
 - [ ] HTTP Client
+    - [ ] Fetch API (WIP)
 - [ ] Child Process
 - [ ] OS
 - [x] Timers
@@ -56,8 +65,7 @@ Roadmap to v0.1.0
     - [x] setInterval
     - [x] clearInterval
     - [x] clearTimeout
-- [ ] ES Modules
-- [ ] Fetch API
+- [x] ES Modules
 - [ ] REPL
 - [ ] URL
 - [ ] Buffer
