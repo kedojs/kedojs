@@ -2,18 +2,19 @@ use boa_engine::{
   js_string,
   object::{
     builtins::{JsFunction, JsPromise},
-    FunctionObjectBuilder,
+    FunctionObjectBuilder, ObjectInitializer,
   },
-  Context, JsResult, JsValue, NativeFunction,
+  property::Attribute,
+  Context, JsObject, JsResult, JsValue, NativeFunction,
 };
 use std::{cell::RefCell, io, rc::Rc};
 use tokio::task::spawn_blocking;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum PropertyNameKind {
-    Key,
-    Value,
-    KeyAndValue,
+  Key,
+  Value,
+  KeyAndValue,
 }
 
 pub async fn asyncify<F, T>(f: F) -> io::Result<T>
@@ -35,7 +36,7 @@ pub fn async_method<
 >(
   f: fn(&JsValue, &[JsValue], &mut Context) -> Fut,
 ) -> NativeFunction {
-  // SAFETY: `File` doesn't contain types that need tracing.
+  // SAFETY: it doesn't contain types that need tracing.
   unsafe {
     NativeFunction::from_closure(move |this, args, context| {
       let future = f(this, args, context);
@@ -44,28 +45,54 @@ pub fn async_method<
   }
 }
 
-// pub fn async_method_with_state<
-//   Fut: std::future::IntoFuture<Output = JsResult<JsValue>> + 'static, T: 'static,
-// >(
-//   f: fn(&JsValue, &[JsValue], &mut T, &mut Context) -> Fut,
-//   state: Rc<RefCell<T>>,
-// ) -> NativeFunction {
-//   // SAFETY: `File` doesn't contain types that need tracing.
-//   unsafe {
-//     NativeFunction::from_closure(move |this, args, context| {
-//       let future = f(this, args, &mut state.borrow_mut(), context);
-//       Ok(JsPromise::from_future(future, context).into())
-//     })
-//   }
-// }
+pub fn method_with_state<T: 'static>(
+  f: fn(&JsValue, &[JsValue], &mut T, &mut Context) -> JsResult<JsValue>,
+  state: Rc<RefCell<T>>,
+) -> NativeFunction {
+  // SAFETY: it doesn't contain types that need tracing.
+  unsafe {
+    NativeFunction::from_closure(move |this, args, context| {
+      f(this, args, &mut state.borrow_mut(), context)
+    })
+  }
+}
+
+#[allow(dead_code)]
+pub fn async_method_with_state<
+  Fut: std::future::IntoFuture<Output = JsResult<JsValue>> + 'static,
+  T: 'static,
+>(
+  f: fn(&JsValue, &[JsValue], &mut T, &mut Context) -> Fut,
+  state: Rc<RefCell<T>>,
+) -> NativeFunction {
+  // SAFETY: it doesn't contain types that need tracing.
+  unsafe {
+    NativeFunction::from_closure(move |this, args, context| {
+      let future = f(this, args, &mut state.borrow_mut(), context);
+      Ok(JsPromise::from_future(future, context).into())
+    })
+  }
+}
 
 pub fn promise_method(
   f: fn(&JsValue, &[JsValue], &mut Context) -> JsPromise,
 ) -> NativeFunction {
-  // SAFETY: `File` doesn't contain types that need tracing.
+  // SAFETY: it doesn't contain types that need tracing.
   unsafe {
     NativeFunction::from_closure(move |this, args, context| {
       Ok(f(this, args, context).into())
+    })
+  }
+}
+
+pub fn promise_method_with_state<T: 'static>(
+  f: fn(&JsValue, &[JsValue], &mut T, &mut Context) -> JsPromise,
+  state: Rc<RefCell<T>>,
+) -> NativeFunction {
+  // SAFETY: it doesn't contain types that need tracing.
+  unsafe {
+    NativeFunction::from_closure(move |this, args, context| {
+      Ok(f(this, args, &mut state.borrow_mut(), context).into())
     })
   }
 }
@@ -80,5 +107,24 @@ pub fn js_function(
     .name(js_string!(name))
     .length(length)
     .constructor(false)
+    .build()
+}
+
+pub fn create_readable_stream_result(
+  context: &mut Context,
+  value: JsValue,
+  done: bool,
+) -> JsObject {
+  ObjectInitializer::new(context)
+    .property(
+      js_string!("value"),
+      value,
+      Attribute::READONLY | Attribute::ENUMERABLE,
+    )
+    .property(
+      js_string!("done"),
+      done,
+      Attribute::READONLY | Attribute::ENUMERABLE,
+    )
     .build()
 }

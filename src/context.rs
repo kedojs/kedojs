@@ -40,7 +40,7 @@ impl HostHooks for Hooks {
     _operation: boa_engine::builtins::promise::OperationType,
     _context: &mut Context,
   ) {
-    todo!("Implement onRejectionHandled and onUnhandledRejection hooks");
+    // todo!("Implement onRejectionHandled and onUnhandledRejection hooks");
   }
 }
 

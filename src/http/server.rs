@@ -1,9 +1,9 @@
-use boa_engine::JsObject;
-use hyper::{service::Service, Request, Response};
+// use boa_engine::JsObject;
+// use hyper::{service::Service, Request, Response};
 
 #[derive(Debug, Clone)]
 struct KedoService {
-    callback: JsObject,
+  // callback: JsObject,
 }
 
 // impl Service<Request<IncomingBody>> for KedoService {

@@ -1,10 +1,12 @@
-use async_stream::stream;
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use boa_engine::job::NativeJob;
 use boa_engine::object::builtins::JsPromise;
 use boa_engine::object::ObjectInitializer;
 use boa_engine::property::PropertyDescriptor;
 use boa_engine::{js_string, Context, JsObject, JsResult, JsValue};
-use http_body_util::{BodyExt, Empty};
+use http_body_util::Empty;
 use hyper::{body::Bytes, Request};
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpStream;
@@ -13,10 +15,11 @@ pub mod headers;
 mod response;
 mod server;
 
+use crate::streams::readable::{ReadableBytesStream, ReadableStream};
 use crate::util::{js_function, promise_method};
 
 use self::headers::Headers;
-use self::response::{FetchResponse, ReadableBytesStream, ReadableStream};
+use self::response::FetchResponse;
 
 pub async fn fetch_json_evt(
   url: &str,
@@ -69,7 +72,7 @@ pub async fn fetch_json_evt(
   // res.collect()
   let readable_stream = ReadableBytesStream::new(res.into_body());
   let response = FetchResponse::new(
-    ReadableStream::new(readable_stream),
+    Rc::new(RefCell::new(ReadableStream::new(readable_stream))),
     status,
     ok,
     headers,
@@ -120,13 +123,10 @@ fn fetch_json(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsPro
 
     NativeJob::new(move |context| match result {
       Ok(response) => {
-        // let json = JsValue::from_json(&entries, context).unwrap();
-
         let res = FetchResponse::to_object(response, context)?;
         resolvers
           .resolve
           .call(&JsValue::undefined(), &[res], context)
-        // todo!("Implement resolve")
       }
       Err(_e) => resolvers.reject.call(&JsValue::undefined(), &[], context),
     })

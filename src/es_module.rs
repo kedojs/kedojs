@@ -13,12 +13,14 @@ use rustc_hash::FxHashMap;
 #[derive(Debug)]
 pub struct KedoModuleLoader {
   root: PathBuf,
+  #[allow(dead_code)]
   std_path: PathBuf,
   module_map: GcRefCell<FxHashMap<PathBuf, Module>>,
 }
 
 impl KedoModuleLoader {
   /// Creates a new `KedoModuleLoader` from a root module path and a standard library path.
+  #[allow(dead_code)]
   pub fn new<P: AsRef<Path>>(root: P, std_path: P) -> JsResult<Self> {
     if cfg!(target_family = "wasm") {
       return Err(

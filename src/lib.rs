@@ -5,6 +5,7 @@ mod timer;
 mod util;
 mod http;
 mod es_module;
+mod streams;
 
 pub mod kedo;
 

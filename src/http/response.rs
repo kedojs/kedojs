@@ -1,82 +1,28 @@
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::{future::Future, pin::Pin};
+
+use std::future::Future;
 
 use boa_engine::job::NativeJob;
 use boa_engine::object::builtins::JsPromise;
 use boa_engine::object::ObjectInitializer;
 use boa_engine::property::Attribute;
-use boa_engine::{
-  js_string, Context, JsNativeError, JsObject, JsResult, JsValue, NativeFunction,
-};
+use boa_engine::{js_string, Context, JsNativeError, JsResult, JsValue};
 
-use bytes::Bytes;
-use futures_util::Stream;
 use futures_util::StreamExt;
-use hyper::body::{Body, Incoming};
-use hyper::header;
 
-// use crate::util::async_method_with_state;
+use crate::streams::readable::ReadableStream;
+use crate::util::promise_method_with_state;
 
 use super::headers::Headers;
 
-#[derive(Debug)]
-pub struct ReadableBytesStream(Incoming);
-
-impl Stream for ReadableBytesStream {
-  type Item = Result<Bytes, hyper::Error>;
-
-  fn poll_next(
-    self: std::pin::Pin<&mut Self>,
-    cx: &mut std::task::Context<'_>,
-  ) -> std::task::Poll<Option<Self::Item>> {
-    let this = std::pin::Pin::into_inner(self);
-
-    loop {
-      break match Pin::new(&mut this.0).poll_frame(cx) {
-        std::task::Poll::Ready(Some(Ok(chunk))) => {
-          if let Ok(data) = chunk.into_data() {
-            if !data.is_empty() {
-              break std::task::Poll::Ready(Some(Ok(data)));
-            }
-          }
-
-          continue;
-        }
-        std::task::Poll::Ready(Some(Err(e))) => std::task::Poll::Ready(Some(Err(e))),
-        std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
-        std::task::Poll::Pending => std::task::Poll::Pending,
-      };
-    }
-  }
-}
-
-impl ReadableBytesStream {
-  pub fn new(incoming: Incoming) -> Self {
-    ReadableBytesStream(incoming)
-  }
-}
-
-// https://streams.spec.whatwg.org/#rs
-// #[derive(Debug, Trace, Finalize, JsData)]
-pub struct ReadableStream {
-  // #[unsafe_ignore_trace]
-  stream: Option<ReadableBytesStream>,
-}
-
-impl ReadableStream {
-  pub fn new(stream: ReadableBytesStream) -> Self {
-    Self {
-      stream: Some(stream),
-    }
-  }
-}
-
 // https://fetch.spec.whatwg.org/#concept-fetch
+
+// https://fetch.spec.whatwg.org/#response
 // #[derive(Debug, Trace, Finalize, JsData)]
 pub struct FetchResponse {
   // #[unsafe_ignore_trace]
-  body: ReadableStream,
+  body: Rc<RefCell<ReadableStream>>,
   body_used: bool,
   status: u16,
   ok: bool,
@@ -120,7 +66,7 @@ trait JsResponse {
 
 impl FetchResponse {
   pub fn new(
-    body: ReadableStream,
+    body: Rc<RefCell<ReadableStream>>,
     status: u16,
     ok: bool,
     headers: Headers,
@@ -153,22 +99,39 @@ impl JsResponse for FetchResponse {
     response: &mut FetchResponse,
     ctx: &mut Context,
   ) -> JsPromise {
-    let stream = response.body.stream.take().unwrap();
+    let stream = response.body.borrow_mut().aquire_lock();
 
     let (promise, resolvers) = JsPromise::new_pending(ctx);
 
+    if stream.is_err() {
+      resolvers
+        .reject
+        .call(
+          &JsValue::undefined(),
+          &[JsNativeError::typ()
+            .with_message("Stream is locked")
+            .to_opaque(ctx)
+            .into()],
+          ctx,
+        )
+        .unwrap();
+
+      return promise;
+    }
+
     let future = async move {
       let mut body = Vec::new();
-      futures_util::pin_mut!(stream); // Pin the stream in place
+      // futures_util::pin_mut!(stream); // Pin the stream in place
 
       // Consume the stream.
+      let mut stream = stream.unwrap();
+
       while let Some(chunk) = stream.next().await {
         if let Ok(data) = chunk {
           body.extend_from_slice(&data);
         }
       }
 
-      // println!("End Stream: {:?}", response.body.stream.0.is_end_stream());
       NativeJob::new(move |context| {
         let body = String::from_utf8(body)
           .map_err(|_| JsNativeError::typ().with_message("Invalid UTF-8"))?;
@@ -181,6 +144,7 @@ impl JsResponse for FetchResponse {
       })
     };
 
+    response.body_used = true;
     ctx.job_queue().enqueue_future_job(Box::pin(future), ctx);
 
     promise
@@ -189,8 +153,8 @@ impl JsResponse for FetchResponse {
   fn to_json_static(
     _this: &JsValue,
     _args: &[JsValue],
-    response: &mut Self,
-    ctx: &mut Context,
+    _response: &mut Self,
+    _ctx: &mut Context,
   ) -> JsResult<JsValue> {
     todo!()
   }
@@ -198,8 +162,8 @@ impl JsResponse for FetchResponse {
   fn to_text(
     _this: &JsValue,
     _args: &[JsValue],
-    response: &mut Self,
-    ctx: &mut Context,
+    _response: &mut Self,
+    _ctx: &mut Context,
   ) -> impl Future<Output = JsResult<JsValue>> {
     async { todo!() }
   }
@@ -207,8 +171,8 @@ impl JsResponse for FetchResponse {
   fn to_blob(
     _this: &JsValue,
     _: &[JsValue],
-    response: &mut Self,
-    ctx: &mut Context,
+    _response: &mut Self,
+    _ctx: &mut Context,
   ) -> JsResult<JsValue> {
     todo!()
   }
@@ -216,8 +180,8 @@ impl JsResponse for FetchResponse {
   fn to_array_buffer(
     _this: &JsValue,
     _args: &[JsValue],
-    response: &mut Self,
-    ctx: &mut Context,
+    _response: &mut Self,
+    _ctx: &mut Context,
   ) -> JsResult<JsValue> {
     todo!()
   }
@@ -235,10 +199,13 @@ impl FetchResponse {
     let url = js_string!(response.url.clone());
     let headers = headers.to_object(ctx)?;
 
+    let body = response.body.clone();
     let state = Rc::new(RefCell::new(response));
+
+    let readable_stream = ReadableStream::to_object(body, ctx)?;
     let object = ObjectInitializer::new(ctx)
       .function(
-        Self::async_method_with_state(Self::to_json, state.clone()),
+        promise_method_with_state(Self::to_json, state.clone()),
         js_string!("json"),
         0,
       )
@@ -247,7 +214,11 @@ impl FetchResponse {
         JsValue::new(status),
         Attribute::READONLY | Attribute::ENUMERABLE,
       )
-      // .accessor(key, get, set, attribute)
+      .property(
+        js_string!("body"),
+        readable_stream,
+        Attribute::READONLY | Attribute::ENUMERABLE,
+      )
       .property(
         js_string!("ok"),
         JsValue::new(ok),
@@ -272,18 +243,4 @@ impl FetchResponse {
 
     Ok(object.into())
   }
-
-  fn async_method_with_state(
-    f: fn(&JsValue, &[JsValue], &mut FetchResponse, &mut Context) -> JsPromise,
-    state: Rc<RefCell<FetchResponse>>,
-  ) -> NativeFunction {
-    // SAFETY: `File` doesn't contain types that need tracing.
-    unsafe {
-      NativeFunction::from_closure(move |this, args, context| {
-        Ok(f(this, args, &mut state.borrow_mut(), context).into())
-      })
-    }
-  }
 }
-
-// https://fetch.spec.whatwg.org/#response
