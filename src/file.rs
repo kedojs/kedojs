@@ -250,12 +250,13 @@ impl FileSystem {
   fn read_file_sync(
     _: &JsValue,
     args: &[JsValue],
-    context: &mut Context,
+    _context: &mut Context,
   ) -> JsResult<JsValue> {
     let path = args
       .get(0)
-      .expect("No path argument provided")
-      .to_string(context)?
+      .ok_or_else(|| JsNativeError::typ().with_message("No path argument provided"))?
+      .as_string()
+      .ok_or_else(|| JsNativeError::typ().with_message("Path must be a string"))?
       .to_std_string_escaped();
 
     let contents = match read_file_evt(&path) {
@@ -278,18 +279,20 @@ impl FileSystem {
   fn write_file_sync(
     _: &JsValue,
     args: &[JsValue],
-    context: &mut Context,
+    _context: &mut Context,
   ) -> JsResult<JsValue> {
     let path = args
       .get(0)
-      .expect("No path argument provided")
-      .to_string(context)?
+      .ok_or_else(|| JsNativeError::typ().with_message("No path argument provided"))?
+      .as_string()
+      .ok_or_else(|| JsNativeError::typ().with_message("Path must be a string"))?
       .to_std_string_escaped();
 
     let data = args
       .get(1)
       .unwrap_or(&JsValue::String(js_string!("")))
-      .to_string(context)?
+      .as_string()
+      .unwrap()
       .to_std_string_escaped();
 
     let result = write_file_evt(&path, &data);
@@ -317,13 +320,13 @@ impl FileSystem {
   fn read_file(
     _: &JsValue,
     args: &[JsValue],
-    context: &mut Context,
+    _context: &mut Context,
   ) -> impl Future<Output = JsResult<JsValue>> {
     let path = args
       .get(0)
       .expect("No path argument provided")
-      .to_string(context)
-      .unwrap()
+      .as_string()
+      .expect("Path must be a string")
       .to_std_string_escaped();
 
     let path = Arc::new(path); // Wrap the path in an Arc
@@ -354,19 +357,19 @@ impl FileSystem {
   fn write_file(
     _: &JsValue,
     args: &[JsValue],
-    context: &mut Context,
+    _context: &mut Context,
   ) -> impl Future<Output = JsResult<JsValue>> {
     let path = args
       .get(0)
       .expect("No path argument provided")
-      .to_string(context)
-      .unwrap()
+      .as_string()
+      .expect("Path must be a string")
       .to_std_string_escaped();
 
     let data = args
       .get(1)
       .unwrap_or(&JsValue::String(js_string!("")))
-      .to_string(context)
+      .as_string()
       .unwrap()
       .to_std_string_escaped();
 
@@ -391,15 +394,15 @@ impl FileSystem {
   ) -> JsResult<JsValue> {
     let path = args
       .get(0)
-      .expect("No path argument provided")
-      .to_string(context)?
+      .ok_or_else(|| JsNativeError::typ().with_message("No path argument provided"))?
+      .as_string()
+      .ok_or_else(|| JsNativeError::typ().with_message("Path must be a string"))?
       .to_std_string_escaped();
 
     let entries = match read_dir_evt(&path) {
       Ok(entries) => {
         let entries: Vec<JsValue> = entries
           .iter()
-          // .map(|entry| entry)
           .map(|entry| KedoDirEntry::from(entry).to_object(context).unwrap().into())
           .collect();
         let array = JsArray::from_iter(entries, context);
@@ -422,8 +425,8 @@ impl FileSystem {
     let path = args
       .get(0)
       .expect("No path argument provided")
-      .to_string(context)
-      .unwrap()
+      .as_string()
+      .expect("Path must be a string")
       .to_std_string_escaped();
 
     let path = Arc::new(path);
@@ -470,12 +473,13 @@ impl FileSystem {
   fn remove_sync(
     _: &JsValue,
     args: &[JsValue],
-    context: &mut Context,
+    _context: &mut Context,
   ) -> JsResult<JsValue> {
     let path = args
       .get(0)
-      .expect("No path argument provided")
-      .to_string(context)?
+      .ok_or_else(|| JsNativeError::typ().with_message("No path argument provided"))?
+      .as_string()
+      .ok_or_else(|| JsNativeError::typ().with_message("Path must be a string"))?
       .to_std_string_escaped();
 
     let recursive = args.get(1).unwrap_or(&JsValue::Boolean(false)).to_boolean();
@@ -496,8 +500,8 @@ impl FileSystem {
     let path = args
       .get(0)
       .expect("No path argument provided")
-      .to_string(context)
-      .unwrap()
+      .as_string()
+      .expect("Path must be a string")
       .to_std_string_escaped();
 
     let recursive = args.get(1).unwrap_or(&JsValue::Boolean(false)).to_boolean();

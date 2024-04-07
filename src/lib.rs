@@ -1,11 +1,12 @@
-mod file_dir;
 mod context;
+mod errors;
+mod es_module;
 mod file;
+mod file_dir;
+mod http;
+mod streams;
 mod timer;
 mod util;
-mod http;
-mod es_module;
-mod streams;
 
 pub mod kedo;
 

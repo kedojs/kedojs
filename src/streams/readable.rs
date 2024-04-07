@@ -16,6 +16,7 @@ use futures_util::StreamExt;
 use hyper::body::{Body, Incoming};
 use tokio::sync::Mutex;
 
+use crate::errors::KedoError;
 use crate::util::{
   create_readable_stream_result, js_function, method_with_state,
   promise_method_with_state,
@@ -25,7 +26,7 @@ use crate::util::{
 pub struct ReadableBytesStream(Incoming);
 
 impl Stream for ReadableBytesStream {
-  type Item = Result<Bytes, hyper::Error>;
+  type Item = Result<Bytes, KedoError>;
 
   fn poll_next(
     self: std::pin::Pin<&mut Self>,
@@ -44,7 +45,9 @@ impl Stream for ReadableBytesStream {
 
           continue;
         }
-        std::task::Poll::Ready(Some(Err(e))) => std::task::Poll::Ready(Some(Err(e))),
+        std::task::Poll::Ready(Some(Err(e))) => {
+          std::task::Poll::Ready(Some(Err(e.into())))
+        }
         std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
         std::task::Poll::Pending => std::task::Poll::Pending,
       };

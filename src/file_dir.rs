@@ -38,24 +38,14 @@ impl KedoDirEntry {
     _: &[JsValue],
     _context: &mut Context,
   ) -> JsResult<JsValue> {
-    if let Some(object) = this.as_object() {
-      if let Some(dir_entry) = object.downcast_ref::<KedoDirEntry>() {
-        let name = dir_entry.name.clone();
-        Ok(JsValue::new(name))
-      } else {
-        Err(
-          JsNativeError::typ()
-            .with_message("'this' is not a DirEntry object")
-            .into(),
-        )
-      }
-    } else {
-      Err(
-        JsNativeError::typ()
-          .with_message("'this' is not a DirEntry object")
-          .into(),
-      )
-    }
+    let dir_entry = this
+      .as_object()
+      .and_then(|object| object.downcast_ref::<KedoDirEntry>())
+      .ok_or_else(|| {
+        JsNativeError::typ().with_message("'this' is not a DirEntry object")
+      })?;
+
+    Ok(JsValue::new(dir_entry.name.clone()))
   }
 
   fn define_object_property(
@@ -230,12 +220,13 @@ impl Class for KedoDirEntry {
       js_string!("is"),
       1,
       NativeFunction::from_fn_ptr(|_this, args, _ctx| {
-        if let Some(arg) = args.first() {
-          if let Some(object) = arg.as_object() {
-            if object.is::<KedoDirEntry>() {
-              return Ok(true.into());
-            }
-          }
+        let object = args
+          .first()
+          .ok_or_else(|| JsNativeError::typ().with_message("No argument provided"))?
+          .as_object();
+
+        if let Some(object) = object {
+          return Ok(object.is::<KedoDirEntry>().into());
         }
 
         Ok(false.into())

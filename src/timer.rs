@@ -5,7 +5,7 @@ use std::pin::Pin;
 use std::rc::Rc;
 
 use boa_engine::job::NativeJob;
-use boa_engine::{js_string, JsResult, JsValue, NativeFunction};
+use boa_engine::{js_string, JsNativeError, JsResult, JsValue, NativeFunction};
 use std::task::{Context, Poll, Waker};
 use tokio::time::{sleep_until, Duration, Instant, Sleep};
 
@@ -188,12 +188,6 @@ impl TimerQueue {
       // new sleep from the next expiration
       *self.sleep.sleep.borrow_mut() = Some(sleep_until(*next_expiration));
 
-      // TODO - Remove
-      // println!(
-      //   "Polling sleep {:?}",
-      //   self.sleep.sleep.borrow_mut().as_mut().unwrap().deadline()
-      // );
-
       let pin = unsafe {
         Pin::new_unchecked(&mut *self.sleep.sleep.borrow_mut().as_mut().unwrap())
           .poll(cx)
@@ -232,30 +226,37 @@ impl Timer {
     let timer = Timer { timers };
     let state = Rc::new(RefCell::new(timer));
 
-    context.register_global_builtin_callable(
-      js_string!(Self::SET_TIMEOUT_NAME),
-      0,
-      Self::timer_function(Self::set_timeout, state.clone()),
-    ).unwrap();
+    context
+      .register_global_builtin_callable(
+        js_string!(Self::SET_TIMEOUT_NAME),
+        0,
+        Self::timer_function(Self::set_timeout, state.clone()),
+      )
+      .unwrap();
 
-    context.register_global_builtin_callable(
-      js_string!(Self::CLEAR_TIMEOUT_NAME),
-      0,
-      Self::timer_function(Self::clear_timer, state.clone()),
-    ).unwrap();
+    context
+      .register_global_builtin_callable(
+        js_string!(Self::CLEAR_TIMEOUT_NAME),
+        0,
+        Self::timer_function(Self::clear_timer, state.clone()),
+      )
+      .unwrap();
 
-    context.register_global_builtin_callable(
-      js_string!(Self::CLEAR_INTERVAL_NAME),
-      0,
-      Self::timer_function(Self::clear_timer, state.clone()),
-    ).unwrap();
+    context
+      .register_global_builtin_callable(
+        js_string!(Self::CLEAR_INTERVAL_NAME),
+        0,
+        Self::timer_function(Self::clear_timer, state.clone()),
+      )
+      .unwrap();
 
-    context.register_global_builtin_callable(
-      js_string!(Self::SET_INTERVAL_NAME),
-      0,
-      Self::timer_function(Self::set_interval, state.clone()),
-    ).unwrap();
-
+    context
+      .register_global_builtin_callable(
+        js_string!(Self::SET_INTERVAL_NAME),
+        0,
+        Self::timer_function(Self::set_interval, state.clone()),
+      )
+      .unwrap();
   }
 
   fn timer_function(
@@ -270,6 +271,9 @@ impl Timer {
     }
   }
 
+  /// https://developer.mozilla.org/en-US/docs/Web/API/setTimeout
+  ///
+  /// The global setTimeout() method sets a timer which executes a function once the timer expires.
   fn set_timeout(
     _: &JsValue,
     args: &[JsValue],
@@ -277,7 +281,8 @@ impl Timer {
     _context: &mut boa_engine::Context,
   ) -> JsResult<JsValue> {
     let callback = args.get(0).cloned();
-    let binding = callback.unwrap();
+    let binding = callback
+      .ok_or_else(|| JsNativeError::typ().with_message("Invalid Callback Function"))?;
     let timeout = match args.get(1).cloned().unwrap_or_default().as_number() {
       Some(timeout) => timeout as u64,
       None => 0,
@@ -296,23 +301,31 @@ impl Timer {
     Ok(JsValue::new(id))
   }
 
+  /// https://developer.mozilla.org/en-US/docs/Web/API/clearTimeout
+  ///
+  /// The global clearTimeout() method cancels a timeout previously established by calling setTimeout().
+  /// If the parameter provided does not identify a previously established action, this method does nothing.
   fn clear_timer(
     _: &JsValue,
     args: &[JsValue],
     timer: &mut Self,
     _context: &mut boa_engine::Context,
   ) -> JsResult<JsValue> {
-    let id = args
-      .get(0)
-      .cloned()
-      .unwrap_or_default()
-      .as_number()
-      .unwrap_or_default() as u64;
+    match args.get(0).cloned().unwrap_or_default().as_number() {
+      Some(id) => {
+        timer.timers.borrow().clear_timer(&(id as u64));
+      }
+      None => {}
+    };
 
-    timer.timers.borrow().clear_timer(&id);
     Ok(JsValue::undefined())
   }
 
+  /// https://developer.mozilla.org/en-US/docs/Web/API/setInterval
+  ///
+  /// The setInterval() method, repeatedly calls a function with a fixed time delay between each call.
+  /// This method returns an interval ID which uniquely identifies the interval,
+  /// so you can remove it later by calling clearInterval().
   fn set_interval(
     _: &JsValue,
     args: &[JsValue],
@@ -320,10 +333,16 @@ impl Timer {
     _context: &mut boa_engine::Context,
   ) -> JsResult<JsValue> {
     let callback = args.get(0).cloned();
-    let binding = callback.unwrap();
-    let timeout = match args.get(1).cloned().unwrap_or_default().as_number() {
-      Some(timeout) => timeout as u64,
-      None => 0,
+    let binding =
+      callback.ok_or_else(|| JsNativeError::typ().with_message("Invalid Callback"))?;
+    let timeout = match args.get(1).cloned() {
+      Some(timeout) => match timeout.as_number() {
+        Some(timeout) => timeout as u64,
+        None => {
+          return Err(JsNativeError::typ().with_message("Invalid timeout").into());
+        }
+      },
+      None => 100,
     };
 
     let arguments = args[2..].to_vec();
@@ -447,7 +466,6 @@ mod tests {
       result
     });
 
-
     tokio::join!(future, future2, poll_fut);
     assert!(timers.lock().unwrap().is_empty());
   }
@@ -497,14 +515,21 @@ mod tests {
     let callable = create_callable_js_value(&mut context, 2, move |_, _args, _| {
       let firt_arg = _args.get(0).unwrap().clone();
       let second_arg = _args.get(1).unwrap().clone();
-      assert_eq!(firt_arg.clone(), JsValue::new(second_arg.as_number().unwrap()/2.0), "Second argument is not 2 times the first argument");
+      assert_eq!(
+        firt_arg.clone(),
+        JsValue::new(second_arg.as_number().unwrap() / 2.0),
+        "Second argument is not 2 times the first argument"
+      );
       println!("Timeout callback {}", firt_arg.as_number().unwrap());
       Ok(JsValue::new(()))
     });
 
     for i in 0..10_000 {
-      let args = vec![JsValue::new(i), JsValue::new(i*2)];
-      let callback = TimerJsCallable { callable: callable.clone(), args };
+      let args = vec![JsValue::new(i), JsValue::new(i * 2)];
+      let callback = TimerJsCallable {
+        callable: callable.clone(),
+        args,
+      };
       timers.lock().unwrap().add_timer(
         Duration::from_secs(2),
         TimerType::Timeout,
@@ -523,8 +548,11 @@ mod tests {
     });
 
     for i in 0..10_000 {
-      let args = vec![JsValue::new(i), JsValue::new(i*2)];
-      let callback = TimerJsCallable { callable: callable.clone(), args };
+      let args = vec![JsValue::new(i), JsValue::new(i * 2)];
+      let callback = TimerJsCallable {
+        callable: callable.clone(),
+        args,
+      };
       timers.lock().unwrap().add_timer(
         Duration::from_secs(4),
         TimerType::Timeout,

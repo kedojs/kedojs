@@ -37,7 +37,6 @@ pub trait WebHeaders {
 
 #[derive(Debug, Clone, Default, Trace, Finalize, JsData)]
 pub struct Headers {
-  // TODO - use vec instead of hashmap
   headers: HashMap<String, String>,
 }
 
@@ -77,19 +76,25 @@ impl From<HashMap<String, String>> for Headers {
 impl From<Value> for Headers {
   fn from(value: Value) -> Self {
     let mut headers = Headers::from(HeaderMap::new());
-    if value.is_array() {
-      let data = value.as_array().unwrap();
-      for value in data {
-        let value = value.as_array().expect("value is not an array");
-        let key = value.get(0).expect("no key provided").as_str().unwrap();
-        let value = value.get(1).expect("no value provided").as_str().unwrap();
-        headers.headers.insert(key.to_string(), value.to_string());
+
+    match value {
+      Value::Null => {}
+      Value::Bool(_) => {}
+      Value::Number(_) => {}
+      Value::String(_) => {}
+      Value::Array(data) => {
+        for value in data {
+          let value = value.as_array().expect("value is not an array");
+          let key = value.get(0).expect("no key provided").as_str().unwrap();
+          let value = value.get(1).expect("no value provided").as_str().unwrap();
+          headers.headers.insert(key.to_string(), value.to_string());
+        }
       }
-    } else {
-      let data = value.as_object().unwrap();
-      for (key, value) in data {
-        let value = value.as_str().expect("value is not a string");
-        headers.headers.insert(key.to_string(), value.to_string());
+      Value::Object(data) => {
+        for (key, value) in data {
+          let value = value.as_str().expect("value is not a string");
+          headers.headers.insert(key.to_string(), value.to_string());
+        }
       }
     }
 
@@ -103,24 +108,12 @@ impl Headers {
     _: &[JsValue],
     _context: &mut Context,
   ) -> JsResult<JsValue> {
-    if let Some(object) = this.as_object() {
-      if let Some(_headers) = object.downcast_ref::<Headers>() {
-        // let headers = headers.headers.clone();
-        Ok(JsValue::new(js_string!("Headers {}")))
-      } else {
-        Err(
-          JsNativeError::typ()
-            .with_message("'this' is not a Headers object")
-            .into(),
-        )
-      }
-    } else {
-      Err(
-        JsNativeError::typ()
-          .with_message("'this' is not a Headers object")
-          .into(),
-      )
-    }
+    let headers = this
+      .as_object()
+      .and_then(JsObject::downcast_ref::<Self>)
+      .ok_or_else(|| JsNativeError::typ().with_message("`this` is not a Headers"))?;
+
+    Ok(JsValue::new(js_string!(format!("{:?}", headers.headers))))
   }
 
   pub fn to_object(&self, context: &mut Context) -> JsResult<JsValue> {
@@ -310,7 +303,7 @@ impl WebHeaders for Headers {
   fn append(
     this: &JsValue,
     args: &[JsValue],
-    context: &mut Context,
+    _context: &mut Context,
   ) -> JsResult<JsValue> {
     let mut headers = this
       .as_object()
@@ -319,22 +312,36 @@ impl WebHeaders for Headers {
 
     let key = args
       .get(0)
-      .expect("No key argument provided")
-      .to_string(context)
-      .unwrap()
+      .ok_or_else(|| JsNativeError::typ().with_message("No key argument provided"))?
+      .as_string()
+      .ok_or_else(|| JsNativeError::typ().with_message("Key argument is not a string"))?
       .to_std_string_escaped();
     let value = args
       .get(1)
-      .expect("No value argument provided")
-      .to_string(context)
-      .unwrap()
+      .ok_or_else(|| JsNativeError::typ().with_message("No value argument provided"))?
+      .as_string()
+      .ok_or_else(|| JsNativeError::typ().with_message("Value argument is not a string"))?
       .to_std_string_escaped();
 
-    headers.headers.insert(key, value);
+    // insert or concatenate the value separated by a comma if the key already exists
+    headers
+      .headers
+      .entry(key)
+      .and_modify(|v| {
+        *v = format!("{}, {}", v, value);
+      })
+      .or_insert(value);
     Ok(JsValue::undefined())
   }
 
-  fn get(this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+  /// https://developer.mozilla.org/en-US/docs/Web/API/Headers/get
+  ///
+  /// Syntax
+  ///    myHeaders.get(name);
+  ///
+  /// The get() method of the Headers interface returns a byte string of all the values of a header within a Headers object with a given name.
+  /// If the requested header doesn't exist in the Headers object, it returns null.
+  fn get(this: &JsValue, args: &[JsValue], _context: &mut Context) -> JsResult<JsValue> {
     let headers = this
       .as_object()
       .and_then(JsObject::downcast_ref::<Self>)
@@ -342,9 +349,9 @@ impl WebHeaders for Headers {
 
     let key = args
       .get(0)
-      .expect("No name argument provided")
-      .to_string(context)
-      .unwrap()
+      .ok_or_else(|| JsNativeError::typ().with_message("No name argument provided"))?
+      .as_string()
+      .ok_or_else(|| JsNativeError::typ().with_message("Name argument is not a string"))?
       .to_std_string_escaped();
 
     let value = headers.headers.get(&key).map(|v| v.as_str());
@@ -356,7 +363,13 @@ impl WebHeaders for Headers {
     Ok(JsValue::null())
   }
 
-  fn has(this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+  /// https://developer.mozilla.org/en-US/docs/Web/API/Headers/has
+  ///
+  /// Syntax
+  ///    myHeaders.has(name);
+  ///
+  /// The has() method of the Headers interface returns a boolean stating whether a Headers object contains a certain header.
+  fn has(this: &JsValue, args: &[JsValue], _context: &mut Context) -> JsResult<JsValue> {
     let headers = this
       .as_object()
       .and_then(JsObject::downcast_ref::<Self>)
@@ -364,9 +377,9 @@ impl WebHeaders for Headers {
 
     let key = args
       .get(0)
-      .expect("No name argument provided")
-      .to_string(context)
-      .unwrap()
+      .ok_or_else(|| JsNativeError::typ().with_message("No name argument provided"))?
+      .as_string()
+      .ok_or_else(|| JsNativeError::typ().with_message("Name argument is not a string"))?
       .to_std_string_escaped();
 
     let value = headers.headers.contains_key(&key);
@@ -374,10 +387,16 @@ impl WebHeaders for Headers {
     Ok(JsValue::new(value))
   }
 
+  /// https://developer.mozilla.org/en-US/docs/Web/API/Headers/delete
+  ///
+  /// Syntax
+  ///   myHeaders.delete(name);
+  ///
+  /// The delete() method of the Headers interface deletes a header from the current Headers object.
   fn delete(
     this: &JsValue,
     args: &[JsValue],
-    context: &mut Context,
+    _context: &mut Context,
   ) -> JsResult<JsValue> {
     let mut headers = this
       .as_object()
@@ -386,17 +405,24 @@ impl WebHeaders for Headers {
 
     let key = args
       .get(0)
-      .expect("No name argument provided")
-      .to_string(context)
-      .unwrap()
+      .ok_or_else(|| JsNativeError::typ().with_message("No name argument provided"))?
+      .as_string()
+      .ok_or_else(|| JsNativeError::typ().with_message("Name argument is not a string"))?
       .to_std_string_escaped();
 
     headers.headers.remove(&key);
-
     Ok(JsValue::undefined())
   }
 
-  fn set(this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+  /// https://developer.mozilla.org/en-US/docs/Web/API/Headers/set
+  ///
+  /// Syntax
+  ///  myHeaders.set(name, value);
+  ///
+  /// The set() method of the Headers interface sets a new value for an existing header inside a Headers object, or adds the header if it does not already exist.
+  /// The difference between set() and Headers.append is that if the specified header already exists and accepts multiple values,
+  /// set() overwrites the existing value with the new one, whereas Headers.append appends the new value to the end of the set of values.
+  fn set(this: &JsValue, args: &[JsValue], _context: &mut Context) -> JsResult<JsValue> {
     let mut headers = this
       .as_object()
       .and_then(JsObject::downcast_mut::<Self>)
@@ -404,15 +430,15 @@ impl WebHeaders for Headers {
 
     let key = args
       .get(0)
-      .expect("No name argument provided")
-      .to_string(context)
-      .unwrap()
+      .ok_or_else(|| JsNativeError::typ().with_message("No key argument provided"))?
+      .as_string()
+      .ok_or_else(|| JsNativeError::typ().with_message("Key argument is not a string"))?
       .to_std_string_escaped();
     let value = args
       .get(1)
-      .expect("No value argument provided")
-      .to_string(context)
-      .unwrap()
+      .ok_or_else(|| JsNativeError::typ().with_message("No value argument provided"))?
+      .as_string()
+      .ok_or_else(|| JsNativeError::typ().with_message("Value argument is not a string"))?
       .to_std_string_escaped();
 
     headers.headers.insert(key, value);
@@ -420,14 +446,34 @@ impl WebHeaders for Headers {
     Ok(JsValue::undefined())
   }
 
+  /// https://developer.mozilla.org/en-US/docs/Web/API/Headers/entries
+  ///
+  /// Syntax
+  ///  myHeaders.entries();
+  ///
+  /// The Headers.entries() method returns an iterator allowing to go through all key/value pairs contained in this object.
+  /// Both the key and value of each pair are String objects.
   fn entries(this: &JsValue, _: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     HeadersIterator::create_headers_iterator(this, PropertyNameKind::KeyAndValue, context)
   }
 
+  /// https://developer.mozilla.org/en-US/docs/Web/API/Headers/keys
+  ///
+  /// Syntax
+  /// myHeaders.keys();
+  ///
+  /// The Headers.keys() method returns an iterator allowing to go through all keys contained in this object.
+  /// The keys are String objects.
   fn keys(this: &JsValue, _: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     HeadersIterator::create_headers_iterator(this, PropertyNameKind::Key, context)
   }
 
+  /// https://developer.mozilla.org/en-US/docs/Web/API/Headers/values
+  /// Syntax
+  /// myHeaders.values();
+  ///
+  /// The Headers.values() method returns an iterator allowing to go through all values contained in this object.
+  /// The values are String objects.
   fn values(this: &JsValue, _: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     HeadersIterator::create_headers_iterator(this, PropertyNameKind::Value, context)
   }
@@ -447,54 +493,51 @@ impl HeadersIterator {
     kind: PropertyNameKind,
     context: &mut Context,
   ) -> JsResult<JsValue> {
-    if let Some(map_obj) = headers.as_object() {
-      if let Some(headers) = map_obj.downcast_mut::<Headers>() {
-        let iter = Self {
-          headers: headers.headers.clone(),
-          next_index: 0,
-          kind,
-        };
-        let map_iterator = JsObject::from_proto_and_data(
-          context
-            .intrinsics()
-            .objects()
-            .iterator_prototypes()
-            .iterator(),
-          iter,
-        );
+    let headers = headers
+      .as_object()
+      .and_then(JsObject::downcast_ref::<Headers>)
+      .ok_or_else(|| JsNativeError::typ().with_message("`this` is not a Headers"))?;
 
-        map_iterator.define_property_or_throw(
-          JsSymbol::to_string_tag(),
-          PropertyDescriptor::builder()
-            .value(js_string!("Headers Iterator"))
-            .writable(false)
-            .enumerable(false)
-            .configurable(true),
-          context,
-        )?;
+    let iter = Self {
+      headers: headers.headers.clone(),
+      next_index: 0,
+      kind,
+    };
+    let map_iterator = JsObject::from_proto_and_data(
+      context
+        .intrinsics()
+        .objects()
+        .iterator_prototypes()
+        .iterator(),
+      iter,
+    );
 
-        map_iterator.define_property_or_throw(
-          js_string!("next"),
-          PropertyDescriptor::builder()
-            .value(js_function(
-              context,
-              NativeFunction::from_fn_ptr(Self::next),
-              "next",
-              0,
-            ))
-            .writable(true)
-            .enumerable(false)
-            .configurable(true),
+    map_iterator.define_property_or_throw(
+      JsSymbol::to_string_tag(),
+      PropertyDescriptor::builder()
+        .value(js_string!("Headers Iterator"))
+        .writable(false)
+        .enumerable(false)
+        .configurable(true),
+      context,
+    )?;
+
+    map_iterator.define_property_or_throw(
+      js_string!("next"),
+      PropertyDescriptor::builder()
+        .value(js_function(
           context,
-        )?;
-        return Ok(map_iterator.into());
-      }
-    }
-    Err(
-      JsNativeError::typ()
-        .with_message("`this` is not a Map")
-        .into(),
-    )
+          NativeFunction::from_fn_ptr(Self::next),
+          "next",
+          0,
+        ))
+        .writable(true)
+        .enumerable(false)
+        .configurable(true),
+      context,
+    )?;
+
+    Ok(map_iterator.into())
   }
 
   fn next(this: &JsValue, _: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
