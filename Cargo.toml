@@ -1,0 +1,17 @@
+workspace = { members = ["cli"] }
+[package]
+name = "kedo_core"
+version = "0.1.0"
+authors = ["Kedo authors <ing.sys.kevincaicedo@gmail.com>"]
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+rust_jsc = "0.1.9"
+tokio = { version = "1", features = ["full"] }
+hyper = { version = "1", features = ["full"] }
+futures = "0.3.30"
