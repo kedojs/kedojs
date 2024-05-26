@@ -1,53 +1,22 @@
-use std::{
-    cell::RefCell,
-    sync::Arc,
-    task::{Context, Poll},
-};
+use std::task::{Context, Poll};
 
 use futures::future::poll_fn;
-use rust_jsc::{JSContext, JSResult, JSValue};
+use rust_jsc::{JSContext, JSObject, JSResult, JSValue};
 
 use crate::{
-    class_manager::ClassManager,
+    class_table::ClassTable,
     console::Console,
     context::KedoContext,
     file::FileSystem,
-    file_dir::FsDirEntry,
+    file_dir::DirEntry,
+    http::headers::{Headers, HeadersIterator},
+    iterator::JsIterator,
     job::{AsyncJobQueue, JobQueue},
+    proto_table::ProtoTable,
     timer_queue::{TimerJsCallable, TimerQueue},
     timers::Timer,
     RuntimeState,
 };
-
-impl<T> Clone for RuntimeState<T>
-where
-    T: JobQueue,
-{
-    fn clone(&self) -> Self {
-        RuntimeState {
-            job_queue: self.job_queue.clone(),
-            timer_queue: self.timer_queue.clone(),
-            class_manager: self.class_manager.clone(),
-        }
-    }
-}
-
-impl<T> RuntimeState<T>
-where
-    T: JobQueue,
-{
-    pub fn new(
-        job_queue: T,
-        timer_queue: TimerQueue,
-        manager: ClassManager,
-    ) -> RuntimeState<T> {
-        RuntimeState {
-            job_queue: Arc::new(RefCell::new(job_queue)),
-            timer_queue: Arc::new(timer_queue),
-            class_manager: Arc::new(manager),
-        }
-    }
-}
 
 pub struct Runtime {
     context: JSContext,
@@ -66,10 +35,13 @@ impl Runtime {
         let kedo_context = KedoContext::from(&context);
         let timer_queue = TimerQueue::new();
         let job_queue = AsyncJobQueue::new();
-        let mut class_manager = ClassManager::new();
+        let mut class_table = ClassTable::new();
+        let mut proto_table = ProtoTable::new();
 
-        Self::init_class(&mut class_manager, &context);
-        let state = RuntimeState::new(job_queue, timer_queue, class_manager);
+        Self::init_class(&mut class_table, &context);
+        Self::init_proto(&mut proto_table, &mut class_table, &context);
+
+        let state = RuntimeState::new(job_queue, timer_queue, class_table, proto_table);
         kedo_context.set_state(state.clone());
         let runtime = Runtime { context, state };
 
@@ -91,10 +63,19 @@ impl Runtime {
             .unwrap();
     }
 
-    fn init_class(class_manager: &mut ClassManager, ctx: &JSContext) {
-        FsDirEntry::init(class_manager).unwrap();
+    fn init_class(class_manager: &mut ClassTable, ctx: &JSContext) {
+        let global = ctx.global_object();
+        DirEntry::init(class_manager, &ctx, &global).unwrap();
+        Headers::init(class_manager, &ctx, &global).unwrap();
+        JsIterator::init(class_manager).unwrap();
+    }
 
-        class_manager.register(&ctx);
+    fn init_proto(
+        proto_table: &mut ProtoTable,
+        class_table: &mut ClassTable,
+        ctx: &JSContext,
+    ) {
+        HeadersIterator::init_proto(proto_table, class_table, ctx)
     }
 
     pub fn evaluate_script(&self, script: &str, line: Option<i32>) -> JSResult<JSValue> {
@@ -108,12 +89,15 @@ impl Runtime {
     fn call_callbaks(&self, callbaks: Vec<TimerJsCallable>) {
         for callback in callbaks {
             let args: &[JSValue] = callback.args.as_slice();
-            callback.callable.call(None, args).unwrap();
+            // TOOD: handle error
+            if let Err(error) = callback.callable.call(None, args) {
+                eprintln!("Error calling timer callback: {}", error.message().unwrap());
+            }
         }
     }
 
     fn run_event_loop(&mut self, cx: &mut Context<'_>) -> Poll<()> {
-        let callbaks = self.state.timer_queue.poll_timers(cx);
+        let callbaks = self.state.timers().poll_timers(cx);
         match callbaks {
             Poll::Ready(callbaks) => {
                 self.call_callbaks(callbaks);
@@ -121,13 +105,21 @@ impl Runtime {
             Poll::Pending => {}
         }
 
-        let _ = self.state.job_queue.borrow_mut().poll(cx);
-        self.state.job_queue.borrow().run_jobs(&self.context);
-        if self.state.job_queue.borrow().is_empty() && self.state.timer_queue.is_empty() {
+        let _ = self.state.job_queue().borrow_mut().poll(cx);
+        self.state.job_queue().borrow().run_jobs(&self.context);
+        if self.state.job_queue().borrow().is_empty() && self.state.timers().is_empty() {
             Poll::Ready(())
         } else {
             Poll::Pending
         }
+    }
+
+    pub fn garbage_collect(&self) {
+        self.context.garbage_collect();
+    }
+
+    pub fn get_memory_usage(&self) -> JSObject {
+        self.context.get_memory_usage()
     }
 
     pub async fn idle(&mut self) {

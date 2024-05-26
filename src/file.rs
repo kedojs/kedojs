@@ -6,7 +6,10 @@ use rust_jsc::{
 };
 
 use crate::{
-    async_util::asyncify, context::KedoContext, file_dir::FsDirEntry, job::NativeJob,
+    async_util::asyncify,
+    context::{downcast_state, KedoContext},
+    file_dir::FsDirEntry,
+    job::{AsyncJobQueue, NativeJob},
 };
 
 pub struct StdFileSystem;
@@ -165,7 +168,7 @@ impl FileSystem {
         let read_dir_callback =
             JSFunction::callback(ctx, Some("readDir"), Some(Self::read_dir));
         file_system.set_property("readDir", &read_dir_callback, Default::default())?;
-        
+
         Ok(file_system)
     }
 
@@ -230,9 +233,13 @@ impl FileSystem {
         __: JSObject,
         args: &[JSValue],
     ) -> JSResult<JSValue> {
-        let path = args[0].as_string()?.to_string();
-        // TODO: use get and set default value for recursive
-        let recursive = args[1].as_boolean();
+        let path = args
+            .get(0)
+            .ok_or_else(|| JSError::new_typ(&ctx, "missing argument").unwrap())?
+            .as_string()?
+            .to_string();
+        let recursive = args.get(1).map_or(false, |value| value.as_boolean());
+
         let content = StdFileSystem::remove_evt(&path, recursive);
         match content {
             Ok(_) => Ok(JSValue::undefined(&ctx)),
@@ -269,7 +276,7 @@ impl FileSystem {
             })
         };
 
-        state.job_queue.borrow().spawn(Box::pin(future));
+        state.job_queue().borrow().spawn(Box::pin(future));
         Ok(promise.into())
     }
 
@@ -302,7 +309,7 @@ impl FileSystem {
             })
         };
 
-        state.job_queue.borrow().spawn(Box::pin(future));
+        state.job_queue().borrow().spawn(Box::pin(future));
         Ok(promise.into())
     }
 
@@ -314,7 +321,7 @@ impl FileSystem {
         args: &[JSValue],
     ) -> JSResult<JSValue> {
         let path = args[0].as_string()?.to_string();
-        let state = KedoContext::from(&ctx).state();
+        let state = downcast_state::<AsyncJobQueue>(&ctx);
 
         let (promise, resolver) = JSPromise::new_pending(&ctx)?;
         let future = async move {
@@ -325,7 +332,7 @@ impl FileSystem {
                         let mut values: Vec<JSValue> = Vec::new();
                         for (_, dir) in entries.into_iter().enumerate() {
                             // TOOD: handle error
-                            values.push(dir.as_object(&ctx).unwrap().into());
+                            values.push(dir.as_object(ctx).unwrap().into());
                         }
 
                         let array = JSArray::new_array(ctx, values.as_slice()).unwrap();
@@ -341,22 +348,9 @@ impl FileSystem {
             })
         };
 
-        state.job_queue.borrow().spawn(Box::pin(future));
+        state.job_queue().borrow().spawn(Box::pin(future));
         Ok(promise.into())
     }
-
-    // async fn read_dir<'js>(
-    //     ctx: rquickjs::Ctx<'js>,
-    //     path: String,
-    // ) -> rquickjs::Result<rquickjs::Value<'js>> {
-    //     let entries = StdFileSystem::read_dir_async_evt(&path).await?;
-    //     let array = rquickjs::Array::new(ctx.clone())?;
-    //     for (index, dir) in entries.into_iter().enumerate() {
-    //         let dir: KedoDirEntry = dir.into();
-    //         array.set(index, dir)?;
-    //     }
-    //     Ok(array.into())
-    // }
 
     #[callback]
     fn remove(
@@ -387,7 +381,7 @@ impl FileSystem {
             })
         };
 
-        state.job_queue.borrow().spawn(Box::pin(future));
+        state.job_queue().borrow().spawn(Box::pin(future));
         Ok(promise.into())
     }
 }

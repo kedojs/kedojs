@@ -2,7 +2,7 @@ use std::{mem::ManuallyDrop, ops::Deref};
 
 use rust_jsc::JSContext;
 
-use crate::{job::AsyncJobQueue, ManuallyDropClone, RuntimeState};
+use crate::{job::{AsyncJobQueue, JobQueue}, ManuallyDropClone, RuntimeState};
 
 pub struct KedoContext<'js>(&'js JSContext);
 
@@ -19,14 +19,15 @@ impl<'js> KedoContext<'js> {
     }
 
     pub fn state(&self) -> ManuallyDropClone<Box<RuntimeState<AsyncJobQueue>>> {
-        let state = self
-            .0
-            .get_shared_data::<RuntimeState<AsyncJobQueue>>()
-            .unwrap();
-        ManuallyDropClone(ManuallyDrop::new(state))
+        downcast_state(self)
     }
 
     pub fn set_state(&self, state: RuntimeState<AsyncJobQueue>) {
         self.0.set_shared_data(Box::new(state));
     }
+}
+
+pub fn downcast_state<T: JobQueue>(context: &JSContext) -> ManuallyDropClone<Box<RuntimeState<T>>> {
+    let state = context.get_shared_data::<RuntimeState<T>>().unwrap();
+    ManuallyDropClone(ManuallyDrop::new(state))
 }

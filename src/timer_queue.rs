@@ -33,7 +33,7 @@ pub struct TimerData {
     timer_type: TimerType,
 }
 
-// create a mutable sleep struct
+// Create a mutable sleep struct
 pub struct SleepWrapper {
     sleep: RefCell<Option<Sleep>>,
 }
@@ -121,7 +121,12 @@ impl TimerQueue {
         // TODO: Removing the timeout from the callback map will prevent the callback from being called
         // but the timer will still be in the timers map
         // this will cause the event loop to keep polling the timer until it is removed
-        self.callback_map.borrow_mut().remove(id);
+        match self.callback_map.borrow_mut().remove(id) {
+            Some(callback) => {
+                callback.callable.unprotect();
+            }
+            None => {}
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -157,6 +162,7 @@ impl TimerQueue {
                     if let Some(callback) =
                         self.callback_map.borrow_mut().remove(&timer.id)
                     {
+                        callback.callable.unprotect();
                         tasks.push(callback);
                     }
                 } else {

@@ -46,6 +46,7 @@ async fn main() {
 
             let mut runtime = Runtime::new();
             let result = runtime.evaluate_module(file);
+
             match result {
                 Ok(_) => {
                     runtime.idle().await;
@@ -54,8 +55,6 @@ async fn main() {
                     println!("Error: {}", e);
                 }
             }
-
-            
         }
         None => {}
     }

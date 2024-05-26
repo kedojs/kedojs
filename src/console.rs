@@ -15,6 +15,7 @@ pub fn format_args(_ctx: &JSContext, args: &[JSValue]) -> Result<String, JSValue
         None => return Ok("".to_string()),
     };
 
+    // TODO: check if target is a string or object
     let mut formatted = target
         .as_string()
         .expect("Failed to convert to string")
@@ -88,7 +89,7 @@ pub fn format_args(_ctx: &JSContext, args: &[JSValue]) -> Result<String, JSValue
                 formatted.push_str(
                     format!(
                         " {}",
-                        arg.as_json_string(0)
+                        arg.as_json_string(1)
                             .unwrap_or_else(|_arg| { JSString::from("[Object]") })
                     )
                     .as_str(),

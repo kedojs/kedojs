@@ -7,7 +7,6 @@ use super::timer_queue::{TimerJsCallable, TimerType};
 
 pub struct Timer {}
 
-// Implement the Timer struct
 impl Timer {
     const SET_TIMEOUT_NAME: &'static str = "setTimeout";
     const SET_INTERVAL_NAME: &'static str = "setInterval";
@@ -69,10 +68,10 @@ impl Timer {
         let state = KedoContext::from(&ctx).state();
         let function = args[0].as_object()?;
         let function = JSFunction::from(function);
-
+        function.protect();
         let timeout = args[1].as_number()? as u64;
         let args = args[2..].to_vec();
-        let id = state.timer_queue.add_timer(
+        let id = state.timers().add_timer(
             Duration::from_millis(timeout),
             TimerType::Timeout,
             TimerJsCallable {
@@ -93,9 +92,10 @@ impl Timer {
         let state = KedoContext::from(&ctx).state();
         let function = args[0].as_object()?;
         let function = JSFunction::from(function);
+        function.protect();
         let timeout = args[1].as_number()? as u64;
         let args = args[2..].to_vec();
-        let id = state.timer_queue.add_timer(
+        let id = state.timers().add_timer(
             Duration::from_millis(timeout),
             TimerType::Interval,
             TimerJsCallable {
@@ -115,7 +115,7 @@ impl Timer {
     ) -> JSResult<JSValue> {
         let state = KedoContext::from(&ctx).state();
         let timer_id = args[0].as_number()? as usize;
-        state.timer_queue.clear_timer(&timer_id);
+        state.timers().clear_timer(&timer_id);
         Ok(JSValue::undefined(&ctx))
     }
 }

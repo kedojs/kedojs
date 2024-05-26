@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 
-use rust_jsc::JSClass;
+use rust_jsc::{JSClass, JSContext};
 
 #[derive(Default)]
-pub struct ClassManager {
+pub struct ClassTable {
     pub classes: HashMap<String, JSClass>,
 }
 
-impl ClassManager {
+impl ClassTable {
     pub fn new() -> Self {
         Self::default()
     }
@@ -52,7 +52,7 @@ impl ClassManager {
         self.classes.keys()
     }
 
-    pub fn register(&mut self, ctx: &rust_jsc::JSContext) {
+    pub fn register(&mut self, ctx: &JSContext) {
         for class in self.classes.values() {
             class.register(ctx).unwrap();
         }

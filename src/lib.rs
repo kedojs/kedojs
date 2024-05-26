@@ -6,20 +6,25 @@ use std::{
     sync::Arc,
 };
 
-use class_manager::ClassManager;
+use class_table::ClassTable;
 use job::JobQueue;
+use proto_table::ProtoTable;
 use timer_queue::TimerQueue;
 
 mod async_util;
+mod class_table;
 mod console;
 mod context;
 mod errors;
 mod file;
 mod file_dir;
+mod http;
+mod iterator;
 mod job;
+mod proto_table;
 mod timer_queue;
 mod timers;
-mod class_manager;
+mod utils;
 
 pub mod runtime;
 
@@ -54,6 +59,10 @@ impl<T> ManuallyDropClone<T> {
         T: Clone,
     {
         self.0.deref().clone()
+    }
+
+    pub fn take(self) -> T {
+        ManuallyDrop::into_inner(self.0)
     }
 }
 
@@ -96,7 +105,57 @@ pub struct RuntimeState<T>
 where
     T: JobQueue,
 {
-    pub job_queue: Arc<RefCell<T>>,
-    pub timer_queue: Arc<TimerQueue>,
-    pub class_manager: Arc<ClassManager>,
+    job_queue: Arc<RefCell<T>>,
+    timer_queue: Arc<TimerQueue>,
+    class_manager: Arc<ClassTable>,
+    proto_manager: Arc<ProtoTable>,
+}
+
+impl<T> Clone for RuntimeState<T>
+where
+    T: JobQueue,
+{
+    fn clone(&self) -> Self {
+        RuntimeState {
+            job_queue: self.job_queue.clone(),
+            timer_queue: self.timer_queue.clone(),
+            class_manager: self.class_manager.clone(),
+            proto_manager: self.proto_manager.clone(),
+        }
+    }
+}
+
+impl<T> RuntimeState<T>
+where
+    T: JobQueue,
+{
+    pub fn new(
+        job_queue: T,
+        timer_queue: TimerQueue,
+        manager: ClassTable,
+        proto: ProtoTable,
+    ) -> RuntimeState<T> {
+        RuntimeState {
+            job_queue: Arc::new(RefCell::new(job_queue)),
+            timer_queue: Arc::new(timer_queue),
+            class_manager: Arc::new(manager),
+            proto_manager: Arc::new(proto),
+        }
+    }
+
+    pub fn timers(&self) -> &TimerQueue {
+        &self.timer_queue
+    }
+
+    pub fn job_queue(&self) -> &Arc<RefCell<T>> {
+        &self.job_queue
+    }
+
+    pub fn classes(&self) -> &Arc<ClassTable> {
+        &self.class_manager
+    }
+
+    pub fn protos(&self) -> &Arc<ProtoTable> {
+        &self.proto_manager
+    }
 }
