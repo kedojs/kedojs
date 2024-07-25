@@ -1,7 +1,10 @@
 use std::task::{Context, Poll};
 
 use futures::future::poll_fn;
-use rust_jsc::{JSContext, JSObject, JSResult, JSValue};
+use rust_jsc::{
+    callback, uncaught_exception, uncaught_exception_event_loop, JSContext, JSFunction,
+    JSObject, JSResult, JSString, JSValue,
+};
 
 use crate::{
     class_table::ClassTable,
@@ -9,10 +12,13 @@ use crate::{
     context::KedoContext,
     file::FileSystem,
     file_dir::DirEntry,
-    http::headers::{Headers, HeadersIterator},
+    http::headers::HeadersIterator,
     iterator::JsIterator,
     job::{AsyncJobQueue, JobQueue},
+    module::KedoModuleLoader,
+    modules,
     proto_table::ProtoTable,
+    std_modules,
     timer_queue::{TimerJsCallable, TimerQueue},
     timers::Timer,
     RuntimeState,
@@ -37,11 +43,32 @@ impl Runtime {
         let job_queue = AsyncJobQueue::new();
         let mut class_table = ClassTable::new();
         let mut proto_table = ProtoTable::new();
+        let mut module_loader = KedoModuleLoader::default();
 
         Self::init_class(&mut class_table, &context);
         Self::init_proto(&mut proto_table, &mut class_table, &context);
+        Self::init_module_loaders(&mut module_loader);
 
-        let state = RuntimeState::new(job_queue, timer_queue, class_table, proto_table);
+        let unhandled_rejection = JSFunction::callback(
+            &context,
+            Some("unhandled_rejection"),
+            Some(Self::unhandled_rejection),
+        );
+        context
+            .set_unhandled_rejection_callback(unhandled_rejection.into())
+            .unwrap();
+        context.set_uncaught_exception_handler(Some(Self::uncaught_exception));
+        context.set_uncaught_exception_at_event_loop_callback(Some(
+            Self::uncaught_exception_event_loop,
+        ));
+
+        let state = RuntimeState::new(
+            job_queue,
+            timer_queue,
+            class_table,
+            proto_table,
+            module_loader,
+        );
         kedo_context.set_state(state.clone());
         let runtime = Runtime { context, state };
 
@@ -53,7 +80,53 @@ impl Runtime {
         self.context.evaluate_module(filename)
     }
 
+    #[callback]
+    fn unhandled_rejection(
+        ctx: JSContext,
+        _function: JSObject,
+        _this: JSObject,
+        args: &[JSValue],
+    ) -> JSResult<JSValue> {
+        println!(
+            "Error unhandled: {}, {}",
+            args[1].as_string().unwrap(),
+            args.len()
+        );
+        Ok(JSValue::undefined(&ctx))
+    }
+
+    #[uncaught_exception]
+    fn uncaught_exception(_ctx: JSContext, _filename: JSString, exception: JSValue) {
+        println!("Uncaught exception: {:?}", exception.as_string().unwrap());
+    }
+
+    #[uncaught_exception_event_loop]
+    fn uncaught_exception_event_loop(_ctx: JSContext, exception: JSValue) {
+        println!(
+            "Uncaught exception in event loop: {:?}",
+            exception.as_string().unwrap()
+        );
+    }
+
+    pub fn evaluate_module_from_source(
+        &self,
+        source: &str,
+        source_url: &str,
+        starting_line_number: Option<i32>,
+    ) -> JSResult<()> {
+        self.context
+            .evaluate_module_from_source(source, source_url, starting_line_number)
+    }
+
+    fn init_module_loaders(module_loader: &mut KedoModuleLoader) {
+        module_loader.register_loader(std_modules::StdModuleLoader);
+        module_loader.register_resolver(std_modules::StdModuleResolver);
+        module_loader.register_resolver(modules::InternalModuleResolver);
+        module_loader.register_synthetic_module(modules::utils::UtilsModule);
+    }
+
     fn init_module(&self) {
+        self.state.module_loader().init(&self.context);
         Console::init(&self.context).unwrap();
         Timer::init(&self.context).unwrap();
         let fs = FileSystem::object(&self.context).unwrap();
@@ -66,7 +139,7 @@ impl Runtime {
     fn init_class(class_manager: &mut ClassTable, ctx: &JSContext) {
         let global = ctx.global_object();
         DirEntry::init(class_manager, &ctx, &global).unwrap();
-        Headers::init(class_manager, &ctx, &global).unwrap();
+        // Headers::init(class_manager, &ctx, &global).unwrap();
         JsIterator::init(class_manager).unwrap();
     }
 
@@ -80,6 +153,10 @@ impl Runtime {
 
     pub fn evaluate_script(&self, script: &str, line: Option<i32>) -> JSResult<JSValue> {
         self.context.evaluate_script(script, line)
+    }
+
+    pub fn link_and_evaluate(&self, key: &str) -> JSValue {
+        self.context.link_and_evaluate_module(key)
     }
 
     pub fn check_syntax(&self, script: &str, line: Option<i32>) -> JSResult<bool> {

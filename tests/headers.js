@@ -30,20 +30,7 @@ console.log(headers.has('None')); // false
 headers2.delete('Content-Type');
 console.log(headers2.has('Content-Type')); // false
 
-// let iter = headers[Symbol.iterator]();
-
-// headers.append('Content-Type', 'application/json');
-// console.log("%o", iter.next());
-// console.log("%o", iter.next());
-// headers.append('H5', 'Value25');
-// console.log("%o", iter.next());
-// console.log("%o", iter.next());
-// console.log("%o", iter.next());
-// console.log("%o", iter.next());
-// headers.append('Authorization', 'Bearer');
-// headers.append('H2', 'Value2');
-// headers.append('H3', 'Value3');
-// console.log("%o", iter.next());
+console.log("Iterating over headers:");
 
 const keys = headers.keys();
 for (let key of keys) {
@@ -61,19 +48,10 @@ for (let value of values) {
 }
 
 const entries = headers.entries();
+console.log(entries);
 for (let [key, value] of headers) {
     console.log(key, value);
 }
 
-for (let index = 0; index < 20000; index++) {
-    let header_tmp = new Headers({
-        "Content-Type": 'application/json',
-        "X-Custom-Header": 'custom value'
-    });
 
-    for (let header of header_tmp) {
-        // console.log(header);
-    }
-
-    // console.log(header_tmp.get('Content-Type')); // application/json
-}
+console.log(headers);

@@ -89,7 +89,7 @@ pub fn format_args(_ctx: &JSContext, args: &[JSValue]) -> Result<String, JSValue
                 formatted.push_str(
                     format!(
                         " {}",
-                        arg.as_json_string(1)
+                        arg.as_json_string(0)
                             .unwrap_or_else(|_arg| { JSString::from("[Object]") })
                     )
                     .as_str(),

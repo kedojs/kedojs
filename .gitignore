@@ -3,3 +3,7 @@
 local
 *.log
 *.log.*
+
+build/
+src/@std/dist/
+kedo-std/@std/dist/

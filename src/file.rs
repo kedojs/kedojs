@@ -108,6 +108,10 @@ impl StdFileSystem {
         Ok(())
     }
 
+    pub fn path_separator() -> String {
+        std::path::MAIN_SEPARATOR.to_string()
+    }
+
     pub async fn remove_async_evt(path: &str, recursive: bool) -> io::Result<()> {
         let path = path.to_owned();
         asyncify(move || Self::remove_evt(&path, recursive)).await?;

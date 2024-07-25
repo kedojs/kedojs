@@ -1,0 +1,20 @@
+[package]
+name = "bundler"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0"
+swc_bundler = { version = "0.230.2", features = ["concurrent"] }
+swc_ecma_ast = "0.115.1"
+swc_common = { version = "0.34.4", features = ["tty-emitter", "concurrent"] }
+swc_ecma_transforms_typescript = "0.191.2"
+swc_ecma_parser = { version = "0.146.12", features = ["typescript"] }
+swc_ecma_codegen = "0.151.1"
+swc_ecma_loader = { version = "0.46.1", features = ["cache"] }
+swc_ecma_minifier = { version = "0.197.3", features = ["concurrent"] }
+swc_ecma_transforms_base = { version = "0.140.3", features = ["concurrent"] }
+swc_ecma_visit = "0.101.0"
+parking_lot = { version = "0.12.3" }

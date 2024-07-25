@@ -8,6 +8,7 @@ use std::{
 
 use class_table::ClassTable;
 use job::JobQueue;
+use module::KedoModuleLoader;
 use proto_table::ProtoTable;
 use timer_queue::TimerQueue;
 
@@ -25,6 +26,9 @@ mod proto_table;
 mod timer_queue;
 mod timers;
 mod utils;
+mod module;
+mod std_modules;
+mod modules;
 
 pub mod runtime;
 
@@ -106,6 +110,7 @@ where
     T: JobQueue,
 {
     job_queue: Arc<RefCell<T>>,
+    module_loader: Arc<KedoModuleLoader>,
     timer_queue: Arc<TimerQueue>,
     class_manager: Arc<ClassTable>,
     proto_manager: Arc<ProtoTable>,
@@ -118,6 +123,7 @@ where
     fn clone(&self) -> Self {
         RuntimeState {
             job_queue: self.job_queue.clone(),
+            module_loader: self.module_loader.clone(),
             timer_queue: self.timer_queue.clone(),
             class_manager: self.class_manager.clone(),
             proto_manager: self.proto_manager.clone(),
@@ -134,9 +140,11 @@ where
         timer_queue: TimerQueue,
         manager: ClassTable,
         proto: ProtoTable,
+        module_loader: KedoModuleLoader,
     ) -> RuntimeState<T> {
         RuntimeState {
             job_queue: Arc::new(RefCell::new(job_queue)),
+            module_loader: Arc::new(module_loader),
             timer_queue: Arc::new(timer_queue),
             class_manager: Arc::new(manager),
             proto_manager: Arc::new(proto),
@@ -157,5 +165,9 @@ where
 
     pub fn protos(&self) -> &Arc<ProtoTable> {
         &self.proto_manager
+    }
+
+    pub fn module_loader(&self) -> &Arc<KedoModuleLoader> {
+        &self.module_loader
     }
 }

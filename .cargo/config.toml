@@ -1,0 +1,10 @@
+[env]
+# For binding generator
+JAVASCRIPTCORE_HEADERS_PATH = "/Users/kcaicedo/Documents/Projects/rust-jsc/WebKit/Source/JavaScriptCore/API"
+CORE_FOUNDATION_HEADERS_PATH = "/Library/Developer/CommandLineTools/SDKs/MacOSX14.4.sdk/System/Library/Frameworks/CoreFoundation.framework/Versions/A/Headers"
+SYSTEM_FRAMEWORKS_PATH = "/Library/Developer/CommandLineTools/SDKs/MacOSX14.4.sdk/System/Library/Frameworks/"
+CUSTOM_BUILD_FRAMEWORK_PATH = "/Users/kcaicedo/Documents/Projects/rust-jsc/WebKit/WebKitBuild/Release"
+WEBKIT_PATH = "/Users/kcaicedo/Documents/Projects/rust-jsc/WebKit"
+
+# For building sys
+RUST_JSC_CUSTOM_BUILD_PATH = "/Users/kcaicedo/Documents/Projects/rust-jsc/WebKit/WebKitBuild/JSCOnly/Release/lib"

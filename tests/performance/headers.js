@@ -1,153 +1,64 @@
 
-// class Headers {
-//     headers = {};
+const headers = new Headers({
+    "Content-Type": 'application/json',
+    "X-Custom-Header": 'custom value'
+});
 
-//     constructor(headers) {
-//         // accept an object or an array of key-value pairs
-//         // const clone = JSON.parse(JSON.stringify(headers))
-//         // this.clone = clone;
-//         if (Array.isArray(headers)) {
-//             headers.forEach(([key, value]) => {
-//                 let key_str = new String(key);
-//                 this.headers[key_str] = new String(value);
-//                 this.original = headers;
-//             });
-//         } else {
-//             Object.keys(headers).forEach(key => {
-//                 this.headers[key] = new String(headers[key]);
-//             });
-//         }
-//     }
+console.log("Is Instanceof: ", headers instanceof Headers); // true
 
-//     get(header) {
-//         return this.headers[header];
-//     }
+console.log(headers.get('Content-Type')); // application/json
+console.log(headers.get('X-Custom-Header')); // custom value
 
-//     set(header, value) {
-//         this.headers[header] = value;
-//     }
+headers.set('Content-Type', 'text/plain');
+console.log(headers.get('Content-Type')); // text/plain
 
-//     has(header) {
-//         return this.headers.hasOwnProperty(header);
-//     }
+const headers2 = new Headers({
+    "Content-Type": 'html/text',
+    "X-Custom-Header": 'Token'
+});
 
-//     delete(header) {
-//         delete this.headers[header];
-//     }
-// }
+console.log(headers2.get('Content-Type')); // html/text
+console.log(headers2.get('X-Custom-Header')); // Token
 
-let headers_array = [];
+console.log("Is Equal: ", headers.get('Content-Type') === headers2.get('Content-Type')); // false
 
-(() => {
-console.log('IIFE');
+console.log(headers.get('Content-Type')); // text/plain
+console.log(headers2.has('Content-Type')); // true
+console.log(headers.has('Content-Type')); // true
+console.log(headers.has('None')); // false
 
-// const headers = new Headers({
-//     "Content-Type": 'application/json',
-//     "X-Custom-Header": 'custom value'
-// });
+headers2.delete('Content-Type');
+console.log(headers2.has('Content-Type')); // false
 
-// console.log(headers.get('Content-Type')); // application/json
-// console.log(headers.get('X-Custom-Header')); // custom value
+const keys = headers.keys();
+for (let key of keys) {
+    console.log(key);
+}
 
-// headers.set('Content-Type', 'text/plain');
-// console.log(headers.get('Content-Type')); // text/plain
+const keys2 = headers.keys();
+for (let key of keys2) {
+    console.log(key);
+}
 
-// setTimeout(() => {
-//     console.log(headers.get('Content-Type')); // application/json
-// }, 1000, "Timeout 1");
+const values = headers.values();
+for (let value of values) {
+    console.log(value);
+}
 
-// headers.delete('Content-Type');
-// console.log(headers instanceof Headers); // true
+const entries = headers.entries();
+for (let [key, value] of headers) {
+    console.log(key, value);
+}
 
-// headers_array.push(headers);
-// for (let index = 0; index < 200; index++) {
-//     let header_tmp = new Headers({
-//         "Content-Type": 'application/json',
-//         "X-Custom-Header": 'custom value'
-//     });
+for (let index = 0; index < 5000; index++) {
+    let header_tmp = new Headers({
+        "Content-Type": 'application/json',
+        "X-Custom-Header": 'custom value'
+    });
 
-//     console.log(header_tmp.get('Content-Type')); // application/json
-// }
-
-let counter2 = 0;
-let timeout_2 = setInterval((arg) => {
-    counter2++;
-    console.log(arg);
-
-    const mockFunc = () => {
-        for (let index = 0; index < 10000; index++) {
-            let header_tmp = new Headers([
-                ['Content-Type', 'application/json'],
-                ['X-Custom-Header', 'custom value ${index}']
-            ]);
-
-            for (let [name, value] of header_tmp) {
-                // console.log(header_tmp.get(name));
-                // header_tmp.get(name);
-            }
-
-            headers_array.push(header_tmp);
-        }
+    for (let header of header_tmp) {
+        // console.log(header);
     }
 
-    mockFunc();
-}, 500, "Timeout 2");
-
-console.log("Timeout 2 ID: ", timeout_2);
-
-let counter = 0;
-let timeout_3 = setInterval((arg) => {
-    console.log(arg);
-    counter++;
-
-    if (counter === 20) {
-        console.log('Clearing interval');
-        clearInterval(timeout_2);
-        const size = headers_array.length;
-        console.log('Header List Size: ', size);
-        for (let index = 0; index < size; index++) {
-            // console.log(`Removing Item: ${index} of ${size}`);
-            headers_array.pop();
-        }
-    }
-
-}, 1000, "Timeout 3");
-console.log("Timeout 3 ID: ", timeout_3);
-
-setTimeout((arg) => {
-    // clearInterval(interval);
-    console.log(arg);
-    clearInterval(timeout_3);
-    headers_array = [];
-    let size = headers_array.length;
-    console.log('clearing interval: ', headers_array.length);
-    for (let index = 0; index < size; index++) {
-        // console.log(`Removing Item: ${index} of ${size}`);
-        headers_array.pop();
-    }
-}, 25000, "Timeout 4");
-})();
-
-
-setInterval(() => {
-    const other = []
-    console.log('Interval');
-    // for (let index = 0; index < 10000; index++) {
-    //     // let header_tmp = new Headers({
-    //     //     "Content-Type": 'application/json',
-    //     //     "X-Custom-Header": 'custom value'
-    //     // });
-
-    //     let header_tmp = new Headers([
-    //         ['Content-Type', 'application/json'],
-    //         ['X-Custom-Header', 'custom value']
-    //     ]);
-
-    //     // console.log(header_tmp.get('Content-Type')); // application/json
-    //     // console.log(header_tmp.get('X-Custom-Header')); // custom value
-    //     // console.log(header_tmp instanceof Headers); // true
-    //     // console.log(header_tmp.has('Content-Type')); // true
-
-    //     other.push(header_tmp);
-    // }
-}, 10000, "Interval");
+    // console.log(header_tmp.get('Content-Type')); // application/json
+}
