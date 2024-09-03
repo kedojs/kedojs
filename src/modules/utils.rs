@@ -1,8 +1,17 @@
+use std::time::Duration;
+
 use rust_jsc::{
     callback, JSArrayBuffer, JSContext, JSFunction, JSObject, JSResult, JSValue,
 };
 
-use crate::module::{ModuleEvaluate, ModuleEvaluateDef};
+use crate::{
+    context::downcast_state,
+    job::AsyncJobQueue,
+    module::{ModuleEvaluate, ModuleEvaluateDef},
+    timer_queue::{TimerJsCallable, TimerType},
+};
+
+use super::{text_encoding::encoding_exports, url_utils::url_exports};
 
 #[callback]
 pub fn is_array_buffer_detached(
@@ -16,15 +25,61 @@ pub fn is_array_buffer_detached(
     Ok(JSValue::boolean(&ctx, array_buffer.is_detached()))
 }
 
-pub fn util_exports(ctx: &JSContext) -> JSObject {
-    let export = JSObject::new(ctx);
+#[callback]
+pub fn queue_internal_timeout(
+    ctx: JSContext,
+    _: JSObject,
+    _this: JSObject,
+    args: &[JSValue],
+) -> JSResult<JSValue> {
+    let state = downcast_state::<AsyncJobQueue>(&ctx);
+    let function = args[0].as_object()?;
+    let function = JSFunction::from(function);
+    let timeout = args[1].as_number()? as u64;
+    let args = args[2..].to_vec();
+    function.protect();
+    let id = state.timers().add_timer(
+        Duration::from_millis(timeout),
+        TimerType::Timeout,
+        TimerJsCallable {
+            callable: function,
+            args,
+        },
+        Some(true),
+    );
 
-    let function =
+    Ok(JSValue::number(&ctx, id as f64))
+}
+
+pub fn util_exports(ctx: &JSContext) -> JSObject {
+    let exports = JSObject::new(ctx);
+
+    let is_array_buffer_detached_fn =
         JSFunction::callback(&ctx, Some("is_detached"), Some(is_array_buffer_detached));
-    export
-        .set_property("is_array_buffer_detached", &function, Default::default())
+    let queue_internal_timeout_fn = JSFunction::callback(
+        &ctx,
+        Some("queue_internal_timeout"),
+        Some(queue_internal_timeout),
+    );
+
+    exports
+        .set_property(
+            "queue_internal_timeout",
+            &queue_internal_timeout_fn,
+            Default::default(),
+        )
         .unwrap();
-    export
+    exports
+        .set_property(
+            "is_array_buffer_detached",
+            &is_array_buffer_detached_fn,
+            Default::default(),
+        )
+        .unwrap();
+
+    url_exports(ctx, &exports);
+    encoding_exports(ctx, &exports);
+    exports
 }
 
 pub struct UtilsModule;
@@ -43,16 +98,11 @@ impl ModuleEvaluateDef for UtilsModule {
 
 #[cfg(test)]
 mod tests {
-    use core::str;
-
-    use rust_jsc::JSContext;
-
-    use crate::{
-        class_table::ClassTable, job::AsyncJobQueue, module::{KedoModuleLoader, ModuleResolve},
-        proto_table::ProtoTable, timer_queue::TimerQueue, RuntimeState,
-    };
 
     use super::*;
+    use crate::modules::internal_utils_tests::setup_module_loader;
+    use crate::{module::ModuleResolve, tests::test_utils::new_runtime};
+    use rust_jsc::JSContext;
 
     #[test]
     fn test_utils_module() {
@@ -60,58 +110,6 @@ mod tests {
         let module = UtilsModule;
         let exports = module.evaluate(&ctx, "@kedo/internal/utils");
         assert!(exports.has_property("is_array_buffer_detached"));
-    }
-
-    // #[test]
-    // fn test_synthetic_module() {
-    //     let mut loader = KedoModuleLoader::default();
-    //     let module_test_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/rust/modules");
-    //     let module_path = format!("{}/01_module.js", module_test_dir);
-
-    //     let syn_module = KedoSyn {};
-    //     let std_resolver = KedoResolver {
-    //         keys: vec!["@kedo/syn".to_string()].into_iter().collect(),
-    //     };
-
-    //     loader.register_resolver(std_resolver);
-    //     loader.register_synthetic_module(syn_module);
-
-    //     let ctx = JSContext::new();
-    //     loader.init(&ctx);
-
-    //     let state = new_context_state(loader);
-    //     ctx.set_shared_data(Box::new(state));
-
-    //     let result = ctx.evaluate_module(module_path.as_str());
-    //     assert!(result.is_ok());
-
-    //     let result = ctx.evaluate_script(
-    //         r"
-    //         globalThis['@kedo/syn']
-    //     ",
-    //         None,
-    //     );
-
-    //     assert!(result.is_ok());
-
-    //     let result = result.unwrap();
-    //     assert!(result.is_object());
-    //     let obj = result.as_object().unwrap();
-    //     let name = obj.get_property("name").unwrap();
-    //     assert!(name.is_string());
-    //     assert_eq!(name.as_string().unwrap(), "@kedo/syn");
-    // }
-
-    fn new_context_state(loader: KedoModuleLoader) -> RuntimeState<AsyncJobQueue> {
-        let timer_queue = TimerQueue::new();
-        let job_queue = AsyncJobQueue::new();
-        let class_table = ClassTable::new();
-        let proto_table = ProtoTable::new();
-
-        let state =
-            RuntimeState::new(job_queue, timer_queue, class_table, proto_table, loader);
-
-        state
     }
 
     struct UtilsResolver;
@@ -128,16 +126,7 @@ mod tests {
 
     #[test]
     fn test_utils_module_loader() {
-        let mut loader = KedoModuleLoader::default();
-        loader.register_resolver(UtilsResolver);
-        loader.register_synthetic_module(UtilsModule);
-
-        let ctx = JSContext::new();
-        loader.init(&ctx);
-
-        let state = new_context_state(loader);
-        ctx.set_shared_data(Box::new(state));
-
+        let ctx = setup_module_loader();
         let result = ctx.evaluate_module_from_source(
             r#"
             import { is_array_buffer_detached } from '@kedo/internal/utils';
@@ -168,5 +157,61 @@ mod tests {
         let result = ctx.evaluate_script("globalThis.is_detached", None);
         assert!(result.is_ok());
         assert_eq!(result.unwrap().as_boolean(), true);
+    }
+
+    #[tokio::test]
+    async fn test_queue_internal_timeout() {
+        let mut rt = new_runtime();
+        let result = rt.evaluate_module_from_source(
+            r#"
+            import { queue_internal_timeout } from '@kedo/internal/utils';
+            globalThis.id = queue_internal_timeout(() => {
+                globalThis.done = true;
+            }, 100);
+        "#,
+            "index.js",
+            None,
+        );
+        assert!(result.is_ok());
+
+        let result = rt.evaluate_script("globalThis.id", None);
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        assert!(result.is_number());
+        let id = result.as_number().unwrap() as u64;
+        assert_eq!(id, 1);
+
+        rt.idle().await;
+
+        let result = rt.evaluate_script("globalThis.done", None);
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        assert!(result.is_undefined());
+    }
+
+    #[tokio::test]
+    async fn test_queue_internal_timeout_with_blocking() {
+        let mut rt = new_runtime();
+        let result = rt.evaluate_module_from_source(
+            r#"
+            import { queue_internal_timeout } from '@kedo/internal/utils';
+            queue_internal_timeout(() => {
+                globalThis.done = true;
+            }, 100);
+
+            setTimeout(() => {}, 100);
+        "#,
+            "index.js",
+            None,
+        );
+        assert!(result.is_ok());
+
+        rt.idle().await;
+
+        let result = rt.evaluate_script("globalThis.done", None);
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        assert!(result.is_boolean());
+        assert_eq!(result.as_boolean(), true);
     }
 }

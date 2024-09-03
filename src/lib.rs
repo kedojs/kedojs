@@ -22,13 +22,14 @@ mod file_dir;
 mod http;
 mod iterator;
 mod job;
+mod module;
+mod modules;
 mod proto_table;
+mod std_modules;
+mod tests;
 mod timer_queue;
 mod timers;
 mod utils;
-mod module;
-mod std_modules;
-mod modules;
 
 pub mod runtime;
 

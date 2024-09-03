@@ -1,3 +1,2 @@
-import { Queue } from './Queue';
-
-export { Queue };
+export { Queue } from "./Queue";
+export { IterableWeakSet } from "./IterableWeakSet";

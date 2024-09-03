@@ -718,6 +718,57 @@ const RedableStreamAsyncIteratorPrototype = Object.setPrototypeOf(
   AsyncIteratorPrototype,
 );
 
+const isDisturbed = (stream: ReadableStream) => stream[_disturbed];
+const isErrored = (stream: ReadableStream) => stream[_state] === "errored";
+
+const readableStreamEnqueue = (
+  stream: ReadableStream,
+  chunk: ArrayBufferView,
+) => {
+  const controller = stream[_controller];
+  // 1. If stream.[[controller]] implements ReadableStreamDefaultController,
+  if (controller instanceof ReadableStreamDefaultController) {
+    // 1.1. Perform ! ReadableStreamDefaultControllerEnqueue(stream.[[controller]], chunk).
+    readableStreamDefaultControllerEnqueue(controller, chunk);
+  } else {
+    // 2. Otherwise,
+    // 2.1. Assert: stream.[[controller]] implements ReadableByteStreamController.
+    assert(
+      controller instanceof ReadableByteStreamController,
+      "Controller must be a ReadableByteStreamController",
+    );
+    // 2.2. Assert: chunk is an ArrayBufferView.
+    assert(ArrayBuffer.isView(chunk), "Chunk must be an ArrayBufferView");
+    // 2.3. Let byobView be the current BYOB request view for stream.
+    const byobView = controller[_byobRequest]
+      ? controller[_byobRequest].view
+      : null;
+    // 2.4. If byobView is non-null, and chunk.[[ViewedArrayBuffer]] is byobView.[[ViewedArrayBuffer]], then:
+    if (
+      byobView !== null &&
+      chunk.buffer === byobView.buffer &&
+      chunk.byteOffset === byobView.byteOffset &&
+      chunk.byteLength <= byobView.byteLength
+    ) {
+      // 2.4.1. Assert: chunk.[[ByteOffset]] is byobView.[[ByteOffset]].
+      assert(
+        chunk.byteOffset === byobView.byteOffset,
+        "Byte offset must be the same",
+      );
+      // 2.4.2. Assert: chunk.[[ByteLength]] ≤ byobView.[[ByteLength]].
+      assert(
+        chunk.byteLength <= byobView.byteLength,
+        "Byte length must be less than or equal to the view's byte length",
+      );
+      // 2.4.1. Perform ? readableByteStreamControllerRespond(stream.[[controller]], chunk.[[ByteLength]]).
+      readableByteStreamControllerRespond(controller, chunk.byteLength);
+    } else {
+      // 2.5. Otherwise, perform ? ReadableByteStreamControllerEnqueue(stream.[[controller]], chunk).
+      readableByteStreamControllerEnqueue(controller, chunk);
+    }
+  }
+};
+
 const _internalUnderlyingSource = Symbol("[internalUnderlyingSource]");
 
 class ReadableStream {
@@ -2471,10 +2522,22 @@ const readableByteStreamControllerEnqueue = (
   readableByteStreamControllerCallPullIfNeeded(controller);
 };
 
+const readableStreamCloseByteController = (stream: ReadableStream) => {
+  const controller = stream[_controller] as ReadableByteStreamController;
+  if (controller[_closeRequested] === true)
+    throw new TypeError("Close requested is true");
+  // 2. If this.[[stream]].[[state]] is not "readable", throw a TypeError exception.
+  if (controller[_stream][_state] !== "readable")
+    throw new TypeError("Stream is not readable");
+  // 3. Perform ? ReadableByteStreamControllerClose(this).
+  readableByteStreamControllerClose(controller);
+};
+
 const createReadableByteStream = (
   startAlgorithm: () => void,
   pullAlgorithm: () => Promise<void>,
   cancelAlgorithm: (reason: any) => Promise<void>,
+  highWaterMark: number = 0,
 ) => {
   // 1. Let stream be a new ReadableStream.
   const stream = new ReadableStream();
@@ -2489,7 +2552,7 @@ const createReadableByteStream = (
     startAlgorithm,
     pullAlgorithm,
     cancelAlgorithm,
-    0,
+    highWaterMark,
     undefined,
   );
   // 5. Return stream.
@@ -3021,6 +3084,11 @@ export {
   ReadableStreamBYOBReader,
   ReadableStreamReaderMode,
   ReadableStreamType,
+  readableStreamCloseByteController,
   createReadableByteStream,
+  readableStreamEnqueue,
   createReadableStream,
+  readableStreamClose,
+  isDisturbed,
+  isErrored,
 };

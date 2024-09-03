@@ -67,15 +67,15 @@ Roadmap to v0.1.0
     - [x] clearTimeout
 - [x] ES Modules
 - [ ] REPL
-- [ ] URL
+- [x] URL
 - [ ] Buffer
 - [ ] Errors
 - [ ] Crypto
 - [ ] Process
-- [ ] Query String
+- [x] Query String
 - [ ] Events
 - [ ] Streams
-    - [ ] Readable
+    - [x] Readable
     - [ ] Writable
     - [ ] Duplex
     - [ ] Transform

@@ -1,21 +1,15 @@
-import { 
-    ReadableStream, 
-    ReadableStreamDefaultReader, 
-    ReadableStreamDefaultController,
-    ReadableStreamBYOBReader,
-    ReadableByteStreamController,
-    ByteLengthQueuingStrategy,
-    CountQueuingStrategy,
-    ReadableStreamBYOBRequest,
-} from './Readable';
-
 export {
-    ReadableStream,
-    ReadableStreamDefaultReader,
-    ReadableStreamDefaultController,
-    ReadableStreamBYOBReader,
-    ReadableByteStreamController,
-    ByteLengthQueuingStrategy,
-    CountQueuingStrategy,
-    ReadableStreamBYOBRequest,
-};
+  ReadableStream,
+  ReadableStreamDefaultReader,
+  ReadableStreamDefaultController,
+  ReadableStreamBYOBReader,
+  ReadableByteStreamController,
+  ByteLengthQueuingStrategy,
+  CountQueuingStrategy,
+  ReadableStreamBYOBRequest,
+  readableStreamCloseByteController,
+  readableStreamEnqueue,
+  readableStreamClose,
+  isDisturbed,
+  isErrored,
+} from "./Readable";

@@ -429,3 +429,5 @@ for await (const value of myReadableStream) {
 assert.strictEqual(iteratorCount, 3, "Should have read all 3 values");
 
 console.log("ReadableStream tests passed");
+// new Blob(["test"], { type: "text/plain" });
+console.log(decodeURIComponent("test %40"));

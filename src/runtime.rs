@@ -16,7 +16,7 @@ use crate::{
     iterator::JsIterator,
     job::{AsyncJobQueue, JobQueue},
     module::KedoModuleLoader,
-    modules,
+    modules::{self, text_decoder_inner::EncodingTextDecoder, url_record::UrlRecord},
     proto_table::ProtoTable,
     std_modules,
     timer_queue::{TimerJsCallable, TimerQueue},
@@ -139,7 +139,8 @@ impl Runtime {
     fn init_class(class_manager: &mut ClassTable, ctx: &JSContext) {
         let global = ctx.global_object();
         DirEntry::init(class_manager, &ctx, &global).unwrap();
-        // Headers::init(class_manager, &ctx, &global).unwrap();
+        UrlRecord::init_class(class_manager).unwrap();
+        EncodingTextDecoder::init_class(class_manager).unwrap();
         JsIterator::init(class_manager).unwrap();
     }
 
@@ -148,7 +149,13 @@ impl Runtime {
         class_table: &mut ClassTable,
         ctx: &JSContext,
     ) {
-        HeadersIterator::init_proto(proto_table, class_table, ctx)
+        HeadersIterator::init_proto(proto_table, class_table, ctx);
+        UrlRecord::init_proto(proto_table, class_table, ctx).unwrap();
+        EncodingTextDecoder::init_proto(proto_table, class_table, ctx).unwrap();
+    }
+
+    pub fn context(&self) -> &JSContext {
+        &self.context
     }
 
     pub fn evaluate_script(&self, script: &str, line: Option<i32>) -> JSResult<JSValue> {

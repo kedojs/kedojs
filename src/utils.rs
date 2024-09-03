@@ -1,6 +1,6 @@
 use std::mem::ManuallyDrop;
 
-use rust_jsc::{JSObject, PrivateData};
+use rust_jsc::{JSContext, JSError, JSObject, PrivateData};
 
 use crate::ManuallyDropClone;
 
@@ -31,4 +31,11 @@ pub fn drop_ptr<T>(data_ptr: PrivateData) {
         let value = Box::from_raw(data_ptr as *mut T);
         drop(value);
     };
+}
+
+pub fn map_err_from_option<T>(ctx: &JSContext, value: Option<T>) -> Result<T, JSError> {
+    match value {
+        Some(value) => Ok(value),
+        None => Err(JSError::new_typ(ctx, "Expected 1 argument")?),
+    }
 }

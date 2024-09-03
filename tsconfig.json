@@ -8,5 +8,6 @@
     "allowJs": true,
     "esModuleInterop": true
   },
-  "include": ["kedo-std/**/*.ts", "kedo-std/**/**/*.ts"]
+  "include": ["kedo-std/**/*.ts", "kedo-std/**/**/*.ts"],
+  "exclude": ["node_modules"]
 }

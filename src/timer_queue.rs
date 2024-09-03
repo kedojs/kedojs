@@ -31,6 +31,7 @@ pub struct TimerData {
     id: TimerId,
     duration: Duration,
     timer_type: TimerType,
+    non_blocking: bool,
 }
 
 // Create a mutable sleep struct
@@ -42,6 +43,7 @@ pub struct TimerQueue {
     timers: RefCell<BTreeMap<Instant, Vec<TimerData>>>,
     callback_map: RefCell<HashMap<TimerId, TimerJsCallable>>,
     next_timer_id: Cell<TimerId>,
+    ref_count: Cell<usize>,
     sleep: Box<SleepWrapper>,
     waker: RefCell<Option<Waker>>,
 }
@@ -57,6 +59,7 @@ impl TimerQueue {
             timers: RefCell::new(BTreeMap::new()),
             callback_map: RefCell::new(HashMap::new()),
             next_timer_id: Cell::new(0),
+            ref_count: Cell::new(0),
             sleep: Box::new(SleepWrapper {
                 sleep: RefCell::new(None),
             }),
@@ -69,10 +72,17 @@ impl TimerQueue {
         duration: Duration,
         timer_type: TimerType,
         callback: TimerJsCallable,
+        non_blocking: Option<bool>,
     ) -> TimerId {
         let expiration = Instant::now() + duration;
         let id = self.next_timer_id.get() + 1;
         self.next_timer_id.set(id);
+
+        let non_blocking_flag = non_blocking.unwrap_or(false);
+        if !non_blocking_flag {
+            // ref_count is used to keep the TimerQueue alive
+            self.ref_count.set(self.ref_count.get() + 1);
+        }
 
         let mut timers = self.timers.borrow_mut();
         timers
@@ -82,6 +92,7 @@ impl TimerQueue {
                 id,
                 timer_type,
                 duration,
+                non_blocking: non_blocking_flag,
             });
         // not sure why rust extends the lifetime of the timers borrow
         drop(timers);
@@ -110,7 +121,6 @@ impl TimerQueue {
             // wake if sleep deadline is already expired
             if let Some(sleep) = &*sleep {
                 if sleep.deadline() <= Instant::now() {
-                    // println!("sleep deadline: {:?}", sleep.deadline());
                     self.wake();
                 }
             }
@@ -124,13 +134,26 @@ impl TimerQueue {
         match self.callback_map.borrow_mut().remove(id) {
             Some(callback) => {
                 callback.callable.unprotect();
+                self.ref_count.set(self.ref_count.get() - 1);
             }
             None => {}
+        };
+
+        // remove the timer from the timers map
+        let mut timers = self.timers.borrow_mut();
+        for (_, timer_data) in timers.iter_mut() {
+            timer_data.retain(|timer| timer.id != *id);
         }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.timers.borrow().is_empty()
+        // println!(
+        //     "is_empty: timers: {:?}, ref_count: {:?}",
+        //     self.timers.borrow().is_empty(),
+        //     self.ref_count.get()
+        // );
+        // check if the timers map is empty or the ref_count is 0
+        self.timers.borrow().is_empty() || self.ref_count.get() == 0
     }
 
     pub fn poll_timers(&self, cx: &mut Context<'_>) -> Poll<Vec<TimerJsCallable>> {
@@ -143,7 +166,6 @@ impl TimerQueue {
         // 1. check for ready timers and remove them after calling their callbacks
         // 2. poll the sleep future to determine when the next timer will expire
         // 3. if all timers are expired, return Poll::Ready(()), otherwise return Poll::Pending
-        // println!("get in poll timers");
         let mut timers = self.timers.borrow_mut();
         let keys: Vec<_> = timers.keys().cloned().take_while(|&k| k <= now).collect();
 
@@ -155,6 +177,7 @@ impl TimerQueue {
             // check if the timer type is Timeout before removing it dont call the remove method
             // get the timer data from the timers map
             let data = timers.remove(&key).unwrap();
+            let mut ref_counter = self.ref_count.get();
 
             for timer in data {
                 // remove the callback from the callback map if the timer type is Timeout
@@ -164,6 +187,10 @@ impl TimerQueue {
                     {
                         callback.callable.unprotect();
                         tasks.push(callback);
+                        // if timer is not non-blocking, decrement the ref_counter
+                        if !timer.non_blocking {
+                            ref_counter = ref_counter - 1;
+                        }
                     }
                 } else {
                     // if the timer type is Interval, add the timer back to the timers map
@@ -180,6 +207,8 @@ impl TimerQueue {
                     }
                 };
             }
+            // update ref_count
+            self.ref_count.set(ref_counter);
         }
 
         if !timers.is_empty() {

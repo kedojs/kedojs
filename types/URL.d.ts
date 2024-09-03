@@ -1,0 +1,56 @@
+import { UrlRecord } from "@kedo/internal/utils";
+declare const _urlObject: unique symbol;
+declare const _list: unique symbol;
+declare class URLSearchParams {
+    [_list]: [string, string][];
+    [_urlObject]: URL | null;
+    constructor(init?: [string, string][] | Record<string, string> | string);
+    private update;
+    get size(): number;
+    append(name: string, value: string): void;
+    delete(name: string, value?: string): void;
+    get(name: string): string | null;
+    getAll(name: string): string[];
+    has(name: string, value?: string): boolean;
+    set(name: string, value: string): void;
+    entries(): IterableIterator<[string, string]>;
+    keys(): IterableIterator<string>;
+    values(): IterableIterator<string>;
+    sort(): void;
+    toString(): string;
+    [Symbol.iterator](): IterableIterator<[string, string]>;
+}
+declare const _urlRecord: unique symbol;
+declare const _queryObject: unique symbol;
+declare class URL {
+    [_queryObject]: URLSearchParams;
+    [_urlRecord]: UrlRecord;
+    constructor(url: string, base?: string);
+    static parse(url: string, base?: string): URL | null;
+    static canParse(url: string, base?: string): boolean;
+    get searchParams(): URLSearchParams;
+    get origin(): string;
+    get protocol(): string;
+    set protocol(value: string);
+    get username(): string;
+    set username(value: string);
+    get password(): string;
+    set password(value: string);
+    get host(): string;
+    set host(value: string);
+    get hostname(): string;
+    set hostname(value: string);
+    get port(): string;
+    set port(value: string | null);
+    get pathname(): string;
+    set pathname(value: string);
+    get search(): string;
+    set search(value: string);
+    get hash(): string;
+    set hash(value: string);
+    toJSON(): string;
+    toString(): string;
+    get href(): string;
+    set href(value: string);
+}
+export { URLSearchParams, URL };

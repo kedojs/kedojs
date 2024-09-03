@@ -1,5 +1,3 @@
-use std::thread::sleep;
-
 // use bundler::BundleArgs;
 use clap::{Parser, Subcommand};
 use kedo_core::runtime::Runtime;
@@ -64,9 +62,17 @@ async fn main() {
 
             let mut runtime = Runtime::new();
             // Load the standard library
-            // let result =
-            //     runtime.evaluate_module_from_source(STD_INDEX, "src/@std/index.js", None);
-            // assert!(result.is_ok());
+            let result =
+                runtime.evaluate_module_from_source(STD_INDEX, "src/@std/index.js", None);
+            // match result {
+            //     Ok(_) => {
+            //         println!("Standard library loaded");
+            //     }
+            //     Err(e) => {
+            //         println!("Error: {}", e.message().unwrap());
+            //     }
+            // }
+            assert!(result.is_ok());
             // println!(
             //     "Result Check: {:?}",
             //     runtime.check_syntax("console.log('Kevin')", None).unwrap()

@@ -68,9 +68,9 @@ impl Timer {
         let state = KedoContext::from(&ctx).state();
         let function = args[0].as_object()?;
         let function = JSFunction::from(function);
-        function.protect();
         let timeout = args[1].as_number()? as u64;
         let args = args[2..].to_vec();
+        function.protect();
         let id = state.timers().add_timer(
             Duration::from_millis(timeout),
             TimerType::Timeout,
@@ -78,6 +78,7 @@ impl Timer {
                 callable: function,
                 args,
             },
+            None,
         );
         Ok(JSValue::number(&ctx, id as f64))
     }
@@ -92,9 +93,9 @@ impl Timer {
         let state = KedoContext::from(&ctx).state();
         let function = args[0].as_object()?;
         let function = JSFunction::from(function);
-        function.protect();
         let timeout = args[1].as_number()? as u64;
         let args = args[2..].to_vec();
+        function.protect();
         let id = state.timers().add_timer(
             Duration::from_millis(timeout),
             TimerType::Interval,
@@ -102,6 +103,7 @@ impl Timer {
                 callable: function,
                 args,
             },
+            None,
         );
         Ok(JSValue::number(&ctx, id as f64))
     }

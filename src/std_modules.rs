@@ -10,7 +10,9 @@ impl ModuleResolve for StdModuleResolver {
         match module {
             "@kedo/assert" => module.to_string(),
             "@kedo/stream" => module.to_string(),
+            "@kedo/events" => module.to_string(),
             "@kedo/ds" => module.to_string(),
+            "@kedo/web/internals" => module.to_string(),
             _ => unreachable!("Module not found: {}", module),
         }
     }
@@ -28,7 +30,11 @@ impl ModuleLoader for StdModuleLoader {
         match module {
             "@kedo/assert" => include_str!("@std/dist/assert/assert.js").to_string(),
             "@kedo/stream" => include_str!("@std/dist/stream/stream.js").to_string(),
+            "@kedo/events" => include_str!("@std/dist/events/events.js").to_string(),
             "@kedo/ds" => include_str!("@std/dist/ds/index.js").to_string(),
+            "@kedo/web/internals" => {
+                include_str!("@std/dist/web/internals.js").to_string()
+            }
             _ => unreachable!("Module not found: {}", module),
         }
     }

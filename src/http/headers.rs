@@ -291,7 +291,6 @@ impl Headers {
     /// This is the place to clean up any resources that the object may have.
     #[finalize]
     fn finalize(data_ptr: PrivateData) {
-        // println!("Finalizing Headers");
         drop_ptr::<HeadersMap>(data_ptr);
     }
 

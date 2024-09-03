@@ -37,12 +37,21 @@ fn main() {
     let entries = vec![
         "index.ts".to_string(),
         "ds/index.ts".to_string(),
+        "events/events.ts".to_string(),
         "stream/stream.ts".to_string(),
         "assert/assert.js".to_string(),
+        // "web/Headers.ts".to_string(),
+        // "web/AbortSignal.ts".to_string(),
+        "web/internals.ts".to_string(),
     ];
 
-    let external_modules =
-        vec!["@kedo/internal/utils".to_string(), "@kedo/ds".to_string()];
+    let external_modules = vec![
+        "@kedo/internal/utils".to_string(),
+        "@kedo/ds".to_string(),
+        "@kedo/stream".to_string(),
+        "@kedo/web/internals".to_string(),
+        "@kedo/events".to_string(),
+    ];
 
     match &cli.command {
         Some(Commands::Bundle { output, minify }) => {
