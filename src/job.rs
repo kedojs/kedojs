@@ -3,14 +3,14 @@ use std::{
     collections::VecDeque,
     fmt::Debug,
     future::Future,
-    io::Error,
     pin::Pin,
     task::{Context, Poll, Waker},
 };
 
 use futures::{stream::FuturesUnordered, StreamExt as _};
+use rust_jsc::JSError;
 
-pub type JsResult<T> = Result<T, Error>;
+pub type JsResult<T> = Result<T, JSError>;
 
 pub struct NativeJob {
     f: Box<dyn FnOnce(&rust_jsc::JSContext) -> JsResult<()>>,
@@ -43,7 +43,6 @@ impl NativeJob {
 }
 
 pub type FutureJob = Pin<Box<dyn Future<Output = NativeJob> + 'static>>;
-
 
 /// A queue of `ECMAscript` [Jobs].
 ///

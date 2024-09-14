@@ -24,14 +24,15 @@ mod iterator;
 mod job;
 mod module;
 mod modules;
+mod promise;
 mod proto_table;
+pub mod runtime;
 mod std_modules;
+mod streams;
 mod tests;
 mod timer_queue;
 mod timers;
 mod utils;
-
-pub mod runtime;
 
 pub(crate) struct ManuallyDropArc<T>(ManuallyDrop<Arc<T>>);
 

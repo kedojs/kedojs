@@ -203,6 +203,7 @@ declare module "@kedo/stream" {
   }
 
   export function isDisturbed(stream: ReadableStream): boolean;
+  export function isInReadableState(stream: ReadableStream): boolean;
   export function isErrored(stream: ReadableStream): boolean;
   export function readableStreamEnqueue(
     stream: ReadableStream,

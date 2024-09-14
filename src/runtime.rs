@@ -17,8 +17,10 @@ use crate::{
     job::{AsyncJobQueue, JobQueue},
     module::KedoModuleLoader,
     modules::{self, text_decoder_inner::EncodingTextDecoder, url_record::UrlRecord},
+    promise::InternalPromise,
     proto_table::ProtoTable,
     std_modules,
+    streams::streams::JSReadableStreamResource,
     timer_queue::{TimerJsCallable, TimerQueue},
     timers::Timer,
     RuntimeState,
@@ -142,6 +144,8 @@ impl Runtime {
         UrlRecord::init_class(class_manager).unwrap();
         EncodingTextDecoder::init_class(class_manager).unwrap();
         JsIterator::init(class_manager).unwrap();
+        JSReadableStreamResource::init_class(class_manager).unwrap();
+        InternalPromise::init_class(class_manager).unwrap();
     }
 
     fn init_proto(

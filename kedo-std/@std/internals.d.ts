@@ -1,3 +1,9 @@
+type HeadersGuard =
+  | "none"
+  | "immutable"
+  | "request"
+  | "request-no-cors"
+  | "response";
 declare module "@kedo/web/internals" {
   type HeadersInit = Headers | Record<string, string> | [string, string][];
   type ForEachCallback = (
@@ -6,12 +12,7 @@ declare module "@kedo/web/internals" {
     headers: Headers,
   ) => void;
   type PropertyNameKind = "KeyAndValue" | "Key" | "Value";
-  type HeadersGuard =
-    | "none"
-    | "immutable"
-    | "request"
-    | "request-no-cors"
-    | "response";
+
   const fillHeadersMapFrom: (
     headers: HeadersInit,
     headersMap: Headers,

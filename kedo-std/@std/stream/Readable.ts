@@ -160,6 +160,10 @@ function isReadableStream(stream: ReadableStream) {
   return isObject(stream) && stream[_controller] !== undefined;
 }
 
+function isInReadableState(stream: ReadableStream) {
+  return stream[_state] === "readable";
+}
+
 //x https://streams.spec.whatwg.org/#readable-stream-close
 function readableStreamClose(stream: ReadableStream) {
   // 1. Assert: stream.[[state]] is "readable".
@@ -3089,6 +3093,7 @@ export {
   readableStreamEnqueue,
   createReadableStream,
   readableStreamClose,
+  isInReadableState,
   isDisturbed,
   isErrored,
 };

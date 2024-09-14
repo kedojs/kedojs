@@ -10,6 +10,7 @@ export {
   readableStreamCloseByteController,
   readableStreamEnqueue,
   readableStreamClose,
+  isInReadableState,
   isDisturbed,
   isErrored,
 } from "./Readable";

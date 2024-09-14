@@ -1,8 +1,8 @@
 // import { Headers } from "./web/Headers.js";
 // import { URLSearchParams, URL } from "./web/URL.js";
 // import { DOMException } from "./web/DOMException.js";
-import { Request, Response } from "./web/Request.js";
-import { TextDecoder, TextEncoder } from "./web/TextDecoder.js";
+import { Request, Response } from "./web/Fetch";
+import { TextDecoder, TextEncoder } from "./web/TextDecoder";
 // import { AbortSignal, AbortController } from "./web/AbortSignal.js";
 import {
   AbortSignal,

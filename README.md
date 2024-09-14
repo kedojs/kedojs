@@ -56,8 +56,13 @@ Roadmap to v0.1.0
 - [x] Console API
 - [ ] HTTP Server
     - [ ] serve
-- [ ] HTTP Client
-    - [ ] Fetch API (WIP)
+- [ ] Web API
+    - [ ] Fetch (WIP)
+    - [x] URL
+    - [x] URLSearchParams
+    - [x] Headers
+    - [x] Request
+    - [x] Response
 - [ ] Child Process
 - [ ] OS
 - [x] Timers
@@ -67,13 +72,14 @@ Roadmap to v0.1.0
     - [x] clearTimeout
 - [x] ES Modules
 - [ ] REPL
-- [x] URL
 - [ ] Buffer
 - [ ] Errors
 - [ ] Crypto
 - [ ] Process
 - [x] Query String
-- [ ] Events
+- [x] Events
+    - [x] EventEmitter
+    - [x] TargetEvent
 - [ ] Streams
     - [x] Readable
     - [ ] Writable
