@@ -93,7 +93,7 @@ pub struct InternalPromise {}
 
 impl InternalPromise {
     pub const CLASS_NAME: &'static str = "InternalPrmise";
-    pub const PROTO_NAME: &'static str = "InternalPrmisePrototype";
+    // pub const PROTO_NAME: &'static str = "InternalPrmisePrototype";
 
     pub fn init_class(manaager: &mut ClassTable) -> Result<(), ClassError> {
         let builder = JSClass::builder(Self::CLASS_NAME);
@@ -251,16 +251,88 @@ mod tests {
             );
         }
 
-        // rt.idle().await;
         let mut subcriber = internal_promise.unwrap();
         let (_, value) = tokio::join!(rt.idle(), subcriber.wait(Some(2)));
         let value = value.unwrap();
         let string = match value {
-            InternalPromiseStatus::FulFilled(mvalue) => {
-                mvalue.as_string().unwrap().to_string()
+            InternalPromiseStatus::FulFilled(js_value) => {
+                js_value.as_string().unwrap().to_string()
             }
             _ => panic!("Expected value"),
         };
         assert_eq!(string, "done");
+    }
+
+    #[tokio::test]
+    async fn test_internal_promise_reject() {
+        let mut rt = new_runtime();
+        let _ = rt.evaluate_module_from_source(
+            r#"
+            const promise = new Promise((resolve, reject) => {
+                setTimeout(() => {
+                    reject('error');
+                }, 1000);
+            });
+            globalThis.promise = promise;
+        "#,
+            "index.js",
+            None,
+        );
+
+        let result = rt.evaluate_script("globalThis.promise", None);
+
+        let promise = result.unwrap().as_object().unwrap();
+        let internal_promise = InternalPromise::from_promise(&rt.context(), promise);
+        if internal_promise.is_err() {
+            panic!(
+                "Expected InternalPromise {}",
+                internal_promise.err().unwrap().message().unwrap()
+            );
+        }
+
+        let mut subcriber = internal_promise.unwrap();
+        let (_, value) = tokio::join!(rt.idle(), subcriber.wait(Some(2)));
+        let value = value.unwrap();
+        let string = match value {
+            InternalPromiseStatus::Rejected(js_value) => {
+                js_value.as_string().unwrap().to_string()
+            }
+            _ => panic!("Expected value"),
+        };
+        assert_eq!(string, "error");
+    }
+
+    #[tokio::test]
+    async fn test_internal_promise_timeout() {
+        let mut rt = new_runtime();
+        let _ = rt.evaluate_module_from_source(
+            r#"
+            const promise = new Promise((resolve, reject) => {
+                setTimeout(() => {
+                    resolve('done');
+                }, 2000);
+            });
+            globalThis.promise = promise;
+        "#,
+            "index.js",
+            None,
+        );
+
+        let result = rt.evaluate_script("globalThis.promise", None);
+
+        let promise = result.unwrap().as_object().unwrap();
+        let internal_promise = InternalPromise::from_promise(&rt.context(), promise);
+        if internal_promise.is_err() {
+            panic!(
+                "Expected InternalPromise {}",
+                internal_promise.err().unwrap().message().unwrap()
+            );
+        }
+
+        let mut subcriber = internal_promise.unwrap();
+        let (_, value) = tokio::join!(rt.idle(), subcriber.wait(Some(1)));
+        assert!(value.is_err());
+        let value = value.err().unwrap();
+        assert_eq!(value, InternalPromiseStatus::Elapsed);
     }
 }

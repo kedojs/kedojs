@@ -13,17 +13,16 @@ pub fn parse_url_encoded_form(
     args: &[JSValue],
 ) -> JSResult<JSValue> {
     if args.len() == 0 {
-        return Err(JSError::new_typ(&ctx, "Expected 1 argument").unwrap());
+        return Err(JSError::new_typ(&ctx, "Expected 1 argument")?);
     }
 
-    let input = args[0].as_string().unwrap();
+    let input = args[0].as_string()?;
     let pairs: Vec<(String, String)> =
         form_urlencoded::parse(input.to_string().as_bytes())
             .into_iter()
             .map(|(k, v)| (k.as_ref().to_owned(), v.as_ref().to_owned()))
             .collect();
-    let result = JSArray::new_array(&ctx, &[])
-        .map_err(|e| JSError::new_typ(&ctx, e.to_string()).unwrap())?;
+    let result = JSArray::new_array(&ctx, &[])?;
 
     for (_i, (k, v)) in pairs.iter().enumerate() {
         let pair = JSArray::new_array(
@@ -48,7 +47,7 @@ pub fn serialize_url_encoded_form(
 ) -> JSResult<JSValue> {
     let mut pairs: Vec<(String, String)> = Vec::new();
     if args.len() == 0 || !args[0].is_array() {
-        return Err(JSError::new_typ(&ctx, "Expected 1 argument").unwrap());
+        return Err(JSError::new_typ(&ctx, "Expected 1 argument")?);
     }
 
     let list = JSArray::new(args[0].as_object()?);
@@ -69,26 +68,35 @@ pub fn serialize_url_encoded_form(
 }
 
 pub fn parse_url(ctx: &JSContext, args: &[JSValue]) -> JSResult<Url> {
-    let url = args
-        .get(0)
-        .ok_or_else(|| JSError::new_typ(&ctx, "Expected 1 argument").unwrap())?
-        .as_string()?
-        .to_string();
-    let mut base_url: Option<Url> = None;
+    let url = match args.get(0) {
+        Some(url) => url.as_string()?.to_string(),
+        None => {
+            return Err(JSError::new_typ(&ctx, "Expected 1 argument")?);
+        }
+    };
 
-    if args.len() > 1 && !args[1].is_null() && !args[1].is_undefined() {
-        let base_url_arg = args[1].as_string()?.to_string();
-        match Url::parse(base_url_arg.as_str()) {
-            Ok(url) => base_url = Some(url),
-            Err(e) => {
-                return Err(JSError::new_typ(&ctx, e.to_string()).unwrap());
+    let mut base_url: Option<Url> = None;
+    let base_url_arg = match args.get(1) {
+        Some(base_url) => {
+            if base_url.is_null() || base_url.is_undefined() {
+                None
+            } else {
+                Some(base_url.as_string()?.to_string())
             }
+        }
+        None => None,
+    };
+
+    if let Some(base_url_arg) = base_url_arg {
+        base_url = match Url::parse(&base_url_arg.as_str()) {
+            Ok(url) => Some(url),
+            Err(e) => return Err(JSError::new_typ(&ctx, e.to_string())?),
         }
     }
 
     match Url::options().base_url(base_url.as_ref()).parse(&url) {
         Ok(url) => return Ok(url),
-        Err(e) => return Err(JSError::new_typ(&ctx, e.to_string()).unwrap()),
+        Err(e) => return Err(JSError::new_typ(&ctx, e.to_string())?),
     };
 }
 
@@ -144,7 +152,7 @@ fn basic_url_parse(
             )?;
             Ok(result.into())
         }
-        Err(e) => Err(JSError::new_typ(&ctx, e.to_string()).unwrap()),
+        Err(e) => Err(JSError::new_typ(&ctx, e.to_string())?),
     };
 }
 
@@ -162,8 +170,9 @@ pub fn url_exports(ctx: &JSContext, exports: &JSObject) {
         Some(serialize_url_encoded_form),
     );
 
-    UrlRecord::template_object(ctx, exports).unwrap();
-    EncodingTextDecoder::template_object(ctx, exports).unwrap();
+    UrlRecord::template_object(ctx, exports).expect("Failed to create UrlRecord");
+    EncodingTextDecoder::template_object(ctx, exports)
+        .expect("Failed to create EncodingTextDecoder");
 
     exports
         .set_property(
@@ -171,31 +180,28 @@ pub fn url_exports(ctx: &JSContext, exports: &JSObject) {
             &parse_url_encoded_form_fn,
             Default::default(),
         )
-        .unwrap();
+        .expect("Failed to set parse_url_encoded_form");
     exports
         .set_property(
             "serialize_url_encoded_form",
             &serialize_url_encoded_form_fn,
             Default::default(),
         )
-        .unwrap();
+        .expect("Failed to set serialize_url_encoded_form");
     exports
         .set_property("basic_url_parse", &basic_url_parse_fn, Default::default())
-        .unwrap();
+        .expect("Failed to set basic_url_parse");
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        modules::internal_utils_tests::setup_module_loader,
-        tests::test_utils::new_runtime,
-    };
+    use crate::tests::test_utils::new_runtime;
 
     use super::*;
 
     #[test]
     fn test_parse_url_encoded_form() {
-        let ctx = setup_module_loader();
+        let ctx = new_runtime();
         let result = ctx.evaluate_module_from_source(
             r#"
             import { parse_url_encoded_form } from '@kedo/internal/utils';
@@ -225,7 +231,6 @@ mod tests {
 
     #[test]
     fn test_serialize_url_encoded_form() {
-        // let ctx = setup_module_loader();
         let rt = new_runtime();
         let result = rt.evaluate_module_from_source(
             r#"
@@ -253,7 +258,7 @@ mod tests {
 
     #[test]
     fn test_basic_url_parse() {
-        let ctx = setup_module_loader();
+        let ctx = new_runtime();
         let result = ctx.evaluate_module_from_source(
             r#"
             import { basic_url_parse } from '@kedo/internal/utils';
@@ -297,7 +302,7 @@ mod tests {
 
     #[test]
     fn test_basic_url_parse_with_base_url() {
-        let ctx = setup_module_loader();
+        let ctx = new_runtime();
         let result = ctx.evaluate_module_from_source(
             r#"
             import { basic_url_parse } from '@kedo/internal/utils';

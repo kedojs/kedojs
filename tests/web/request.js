@@ -54,6 +54,7 @@ async function testRequestJsonMethod() {
     headers: { "Content-Type": "application/json" },
   });
 
+  assert.strictEqual(request.headers.get("Content-Type"), "application/json");
   assert.strictEqual(
     request.bodyUsed,
     false,

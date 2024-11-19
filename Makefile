@@ -1,6 +1,8 @@
 # Run: make [target] [file=filename]
+# How to run test for a module: make test-module module=text_encoding::tests
+
 run:
-	(cargo run --manifest-path ./cli/Cargo.toml -- run $(file))
+	(RUST_BACKTRACE=1 cargo run --manifest-path ./cli/Cargo.toml -- run $(file))
 
 bundle:
 	(cargo run --manifest-path ./cli/Cargo.toml -- bundle --output=$(output) --entry=$(entry) --minify)
@@ -17,10 +19,13 @@ release:
 build-lib:
 	(cargo build)
 
-release-lib:
+lib-release:
 	(cargo build --release)
 
 test:
 	(cargo test)
 
-.PHONY: run build release lib lib-release
+test-module:
+	(cargo test --package kedo_core --lib -- modules::$(module) --show-output)
+
+.PHONY: run build release lib lib-release test test-module build-lib bundle bundle-std

@@ -156,6 +156,10 @@ impl TimerQueue {
         self.timers.borrow().is_empty() || self.ref_count.get() == 0
     }
 
+    pub fn len(&self) -> usize {
+        self.timers.borrow().len()
+    }
+
     pub fn poll_timers(&self, cx: &mut Context<'_>) -> Poll<Vec<TimerJsCallable>> {
         // early return if there are no timers
         if self.timers.borrow().is_empty() {

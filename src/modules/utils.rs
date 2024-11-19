@@ -6,8 +6,11 @@ use rust_jsc::{
 
 use crate::{
     context::downcast_state,
+    http::fetch_client::fetch_exports,
     job::AsyncJobQueue,
     module::{ModuleEvaluate, ModuleEvaluateDef},
+    signals::signal_exports,
+    streams::streams::readable_stream_exports,
     timer_queue::{TimerJsCallable, TimerType},
 };
 
@@ -79,6 +82,10 @@ pub fn util_exports(ctx: &JSContext) -> JSObject {
 
     url_exports(ctx, &exports);
     encoding_exports(ctx, &exports);
+    readable_stream_exports(ctx, &exports);
+    fetch_exports(ctx, &exports);
+    signal_exports(ctx, &exports);
+
     exports
 }
 

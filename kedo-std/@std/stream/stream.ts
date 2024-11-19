@@ -9,6 +9,7 @@ export {
   ReadableStreamBYOBRequest,
   readableStreamCloseByteController,
   readableStreamEnqueue,
+  readableStreamResource,
   readableStreamClose,
   isInReadableState,
   isDisturbed,

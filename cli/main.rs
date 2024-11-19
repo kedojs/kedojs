@@ -82,6 +82,7 @@ async fn main() {
             match result {
                 Ok(_) => {
                     runtime.idle().await;
+                    println!("Idle: {:?}", "Complete");
                     // sleep(std::time::Duration::from_secs(5));
                     // println!(
                     //     "Result Check: {:?}",

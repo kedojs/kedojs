@@ -310,4 +310,8 @@ const emptyHeader = (headersMap: Headers) => {
   headersMap[_setCookieValues] = [];
 };
 
-export { Headers, fillHeadersMapFrom, emptyHeader };
+const headerInnerList = (headersMap: Headers) => {
+  return headersMap[_headerList];
+}
+
+export { Headers, fillHeadersMapFrom, headerInnerList, emptyHeader };

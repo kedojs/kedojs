@@ -12,13 +12,14 @@ use crate::{
     context::KedoContext,
     file::FileSystem,
     file_dir::DirEntry,
-    http::headers::HeadersIterator,
+    http::{headers::HeadersIterator, response::JSResponseBodyStreamResource},
     iterator::JsIterator,
     job::{AsyncJobQueue, JobQueue},
     module::KedoModuleLoader,
     modules::{self, text_decoder_inner::EncodingTextDecoder, url_record::UrlRecord},
     promise::InternalPromise,
     proto_table::ProtoTable,
+    signals::InternalSignal,
     std_modules,
     streams::streams::JSReadableStreamResource,
     timer_queue::{TimerJsCallable, TimerQueue},
@@ -56,6 +57,7 @@ impl Runtime {
             Some("unhandled_rejection"),
             Some(Self::unhandled_rejection),
         );
+        unhandled_rejection.protect(); // Protect the function from GC
         context
             .set_unhandled_rejection_callback(unhandled_rejection.into())
             .unwrap();
@@ -140,12 +142,20 @@ impl Runtime {
 
     fn init_class(class_manager: &mut ClassTable, ctx: &JSContext) {
         let global = ctx.global_object();
-        DirEntry::init(class_manager, &ctx, &global).unwrap();
-        UrlRecord::init_class(class_manager).unwrap();
-        EncodingTextDecoder::init_class(class_manager).unwrap();
-        JsIterator::init(class_manager).unwrap();
-        JSReadableStreamResource::init_class(class_manager).unwrap();
-        InternalPromise::init_class(class_manager).unwrap();
+        DirEntry::init(class_manager, &ctx, &global).expect("Failed to init DirEntry");
+        UrlRecord::init_class(class_manager).expect("Failed to init UrlRecord");
+        EncodingTextDecoder::init_class(class_manager)
+            .expect("Failed to init EncodingTextDecoder");
+        JsIterator::init(class_manager).expect("Failed to init JsIterator");
+        JSReadableStreamResource::init_class(class_manager)
+            .expect("Failed to init JsReadableStream");
+        InternalPromise::init_class(class_manager)
+            .expect("Failed to init InternalPromise");
+        InternalSignal::init_class(class_manager).expect("Failed to init InternalSignal");
+        JSReadableStreamResource::init_class(class_manager)
+            .expect("Failed to init JsReadableStream");
+        JSResponseBodyStreamResource::init_class(class_manager)
+            .expect("Failed to init JsResponseBody");
     }
 
     fn init_proto(
@@ -155,7 +165,9 @@ impl Runtime {
     ) {
         HeadersIterator::init_proto(proto_table, class_table, ctx);
         UrlRecord::init_proto(proto_table, class_table, ctx).unwrap();
+        JSReadableStreamResource::init_proto(proto_table, class_table, ctx).unwrap();
         EncodingTextDecoder::init_proto(proto_table, class_table, ctx).unwrap();
+        InternalSignal::init_proto(proto_table, class_table, ctx).unwrap();
     }
 
     pub fn context(&self) -> &JSContext {
@@ -179,18 +191,15 @@ impl Runtime {
             let args: &[JSValue] = callback.args.as_slice();
             // TOOD: handle error
             if let Err(error) = callback.callable.call(None, args) {
-                eprintln!("Error calling timer callback: {}", error.message().unwrap());
+                println!("Error calling timer callback: {}", error.message().unwrap());
             }
         }
     }
 
     fn run_event_loop(&mut self, cx: &mut Context<'_>) -> Poll<()> {
         let callbaks = self.state.timers().poll_timers(cx);
-        match callbaks {
-            Poll::Ready(callbaks) => {
-                self.call_callbaks(callbaks);
-            }
-            Poll::Pending => {}
+        if let Poll::Ready(callbaks) = callbaks {
+            self.call_callbaks(callbaks);
         }
 
         let _ = self.state.job_queue().borrow_mut().poll(cx);

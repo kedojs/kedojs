@@ -17,6 +17,7 @@ async function testResponseConstructor() {
     "Headers should be an instance of Headers",
   );
   strictEqual(response.url, "", "URL should be empty");
+  strictEqual(response.headers.get("Content-Type"), "text/plain", "Content-Type should be text/plain");
 }
 
 async function testResponseBodyMethods() {
@@ -190,4 +191,4 @@ async function runResponseTests() {
   }
 }
 
-runResponseTests();
+await runResponseTests();

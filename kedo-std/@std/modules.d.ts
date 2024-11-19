@@ -3,6 +3,35 @@ declare module "@kedo/internal/utils" {
   export function parse_url_encoded_form(body: string): [string, string][];
   export function serialize_url_encoded_form(data: [string, string][]): string;
   export function encoding_for_label_no_replacement(label: string): string;
+  export function op_send_signal(signal: InternalSignal): void;
+  export function op_read_sync_readable_stream(
+    resource: ReadableStreamResource,
+  ): Uint8Array | undefined;
+  export function op_write_sync_readable_stream(
+    resource: ReadableStreamResource,
+    chunk: Uint8Array,
+  ): void;
+  export function op_read_readable_stream(
+    resource: ReadableStreamResource,
+  ): Promise<Uint8Array | undefined>;
+  export function op_read_response_stream(
+    resource: ResponseStream,
+  ): Promise<Uint8Array | undefined>;
+  export function op_internal_fetch(request: FetchRequest): Promise<FetchResponse>;
+  export function op_write_readable_stream(
+    resource: ReadableStreamResource,
+    chunk: Uint8Array,
+  ): Promise<number>;
+  export function op_close_readable_stream(
+    resource: ReadableStreamResource,
+  ): void;
+  export function op_wait_close_readable_stream(
+    resource: ReadableStreamResource,
+    blocking?: boolean,
+  ): Promise<void>;
+  export class ReadableStreamResource {
+    constructor(highWaterMark: number);
+  }
   export function encoding_decode(
     decoder: EncodingTextDecoder,
     buffer: ArrayBuffer,
@@ -30,9 +59,11 @@ declare module "@kedo/internal/utils" {
     set(key: string, value: string): void;
     toString(): string;
   }
-
   export class EncodingTextDecoder {
     constructor(label: string, fatal: boolean, ignoreBOM: boolean);
+  }
+  export class InternalSignal {
+    constructor();
   }
 }
 
@@ -97,6 +128,24 @@ declare module "@kedo/events" {
 }
 
 type Listener = (...args: any[]) => void | Promise<void>;
+type ResponseStream = {};
+type FetchResponse = {
+  readonly body?: ResponseStream;
+  readonly headers: [string, string][];
+  readonly status: number;
+  readonly status_message: string;
+  readonly url: string;
+}
+type ReadableStreamResource = {};
+type FetchRequest = {
+  stream?: ReadableStreamResource;
+  source?: Uint8Array;
+  signal?: import("@kedo/internal/utils").InternalSignal;
+  redirect?: number;
+  readonly header_list: [string, string][];
+  readonly method: string;
+  readonly url: string;
+}
 
 interface EventInit {
   bubbles?: boolean;
@@ -212,6 +261,10 @@ declare module "@kedo/stream" {
   export function readableStreamCloseByteController(
     stream: ReadableStream,
   ): void;
+  export function readableStreamResource(
+    stream: ReadableStream,
+    size?: number,
+  ): ReadableStreamResource;
   export function readableStreamClose(stream: ReadableStream): void;
 }
 

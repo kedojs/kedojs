@@ -10,6 +10,7 @@ use class_table::ClassTable;
 use job::JobQueue;
 use module::KedoModuleLoader;
 use proto_table::ProtoTable;
+use resources::GlobalResource;
 use timer_queue::TimerQueue;
 
 mod async_util;
@@ -26,13 +27,16 @@ mod module;
 mod modules;
 mod promise;
 mod proto_table;
+mod resources;
 pub mod runtime;
 mod std_modules;
 mod streams;
 mod tests;
 mod timer_queue;
 mod timers;
+mod traits;
 mod utils;
+mod signals;
 
 pub(crate) struct ManuallyDropArc<T>(ManuallyDrop<Arc<T>>);
 
@@ -65,6 +69,10 @@ impl<T> ManuallyDropClone<T> {
         T: Clone,
     {
         self.0.deref().clone()
+    }
+
+    pub fn new(value: T) -> Self {
+        ManuallyDropClone(ManuallyDrop::new(value))
     }
 
     pub fn take(self) -> T {
@@ -116,6 +124,7 @@ where
     timer_queue: Arc<TimerQueue>,
     class_manager: Arc<ClassTable>,
     proto_manager: Arc<ProtoTable>,
+    globals: Arc<GlobalResource>,
 }
 
 impl<T> Clone for RuntimeState<T>
@@ -129,6 +138,7 @@ where
             timer_queue: self.timer_queue.clone(),
             class_manager: self.class_manager.clone(),
             proto_manager: self.proto_manager.clone(),
+            globals: self.globals.clone(),
         }
     }
 }
@@ -150,11 +160,16 @@ where
             timer_queue: Arc::new(timer_queue),
             class_manager: Arc::new(manager),
             proto_manager: Arc::new(proto),
+            globals: Arc::new(GlobalResource::new()),
         }
     }
 
     pub fn timers(&self) -> &TimerQueue {
         &self.timer_queue
+    }
+
+    pub fn globals(&self) -> &Arc<GlobalResource> {
+        &self.globals
     }
 
     pub fn job_queue(&self) -> &Arc<RefCell<T>> {

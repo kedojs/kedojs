@@ -3,7 +3,12 @@
 local
 *.log
 *.log.*
+.DS_Store
 
 build/
 src/@std/dist/
 kedo-std/@std/dist/
+
+tests/manual/*.txt
+.cargo/*
+.idea/

@@ -1,7 +1,7 @@
 // import { Headers } from "./web/Headers.js";
 // import { URLSearchParams, URL } from "./web/URL.js";
 // import { DOMException } from "./web/DOMException.js";
-import { Request, Response } from "./web/Fetch";
+import { Request, Response, fetch } from "./web/Fetch";
 import { TextDecoder, TextEncoder } from "./web/TextDecoder";
 // import { AbortSignal, AbortController } from "./web/AbortSignal.js";
 import {
@@ -23,3 +23,4 @@ globalThis.TextDecoder = TextDecoder;
 globalThis.TextEncoder = TextEncoder;
 globalThis.Request = Request;
 globalThis.Response = Response;
+globalThis.fetch = fetch;

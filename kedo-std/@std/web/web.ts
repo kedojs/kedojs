@@ -1,1 +1,1 @@
-export { Request } from "./Request";
+export { Request, Response, fetch } from "./Fetch";

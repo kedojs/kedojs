@@ -18,6 +18,8 @@ declare module "@kedo/web/internals" {
     headersMap: Headers,
     headersGuard?: HeadersGuard,
   ) => void;
+
+  const headerInnerList: (headers: Headers) => [string, string][];
   class Headers {
     [_headerList]: [string, string][];
     [_setCookieValues]: string[];
@@ -257,6 +259,7 @@ declare module "@kedo/web/internals" {
   export {
     Headers,
     fillHeadersMapFrom,
+    headerInnerList,
     emptyHeader,
     AbortSignal,
     AbortController,

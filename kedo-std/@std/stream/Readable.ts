@@ -1,5 +1,14 @@
 import { Queue } from "@kedo/ds";
-import { is_array_buffer_detached } from "@kedo/internal/utils";
+import {
+  ReadableStreamResource,
+  // op_read_sync_readable_stream,
+  // op_write_sync_readable_stream,
+  op_read_readable_stream,
+  op_write_readable_stream,
+  op_close_readable_stream,
+  is_array_buffer_detached,
+  op_wait_close_readable_stream,
+} from "@kedo/internal/utils";
 import {
   Deferred,
   isPrototypeOf,
@@ -162,6 +171,67 @@ function isReadableStream(stream: ReadableStream) {
 
 function isInReadableState(stream: ReadableStream) {
   return stream[_state] === "readable";
+}
+
+async function writeIntoResourceFromReadableStream(
+  resource: ReadableStreamResource,
+  reader: ReadableStreamDefaultReader,
+  chunk: Uint8Array,
+) {
+  if (chunk.length === 0) {
+    readIntoResourceFromReadableStream(resource, reader);
+    return;
+  }
+
+  const output = await op_write_readable_stream(resource, chunk);
+  if (output === -1) {
+    reader.cancel("Resource stream closed");
+    op_close_readable_stream(resource);
+  } else {
+    readIntoResourceFromReadableStream(resource, reader);
+  }
+}
+
+function readIntoResourceFromReadableStream(
+  resource: ReadableStreamResource,
+  reader: ReadableStreamDefaultReader,
+) {
+  // 1. Let promise be a new promise.
+  // const promise = new Deferred<ReadableStreamReadResult>();
+  // 2. Let readRequest be a new read request with the following items:
+  const readRequest = {
+    chunkSteps: (chunk: Uint8Array) => {
+      writeIntoResourceFromReadableStream(resource, reader, chunk);
+    },
+    closeSteps: () => {
+      op_close_readable_stream(resource);
+    },
+    errorSteps: (e: any) => {
+      reader.cancel(e); // TODO: check if this is correct
+      op_close_readable_stream(resource);
+    },
+  };
+
+  // 3. Perform ! ReadableStreamDefaultReaderRead(this, readRequest).
+  readableStreamDefaultReaderRead(reader, readRequest);
+}
+
+// Resource stream methods
+function readableStreamResource(
+  stream: ReadableStream,
+  size?: number,
+): ReadableStreamResource {
+  const reader = acquireReadableStreamDefaultReader(stream);
+  const highWaterMark = stream[_controller][_strategyHWM] || size || 10;
+  const resource = new ReadableStreamResource(highWaterMark); // TODO: implement unbounded resource
+
+  op_wait_close_readable_stream(resource, false).then(
+    () => reader.cancel("Resource stream closed"),
+    () => {},
+  );
+
+  readIntoResourceFromReadableStream(resource, reader);
+  return resource;
 }
 
 //x https://streams.spec.whatwg.org/#readable-stream-close
@@ -3091,6 +3161,7 @@ export {
   readableStreamCloseByteController,
   createReadableByteStream,
   readableStreamEnqueue,
+  readableStreamResource,
   createReadableStream,
   readableStreamClose,
   isInReadableState,

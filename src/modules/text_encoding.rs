@@ -18,16 +18,19 @@ pub fn encoding_for_label_no_replacement(
     args: &[JSValue],
 ) -> JSResult<JSValue> {
     if args.len() == 0 {
-        return Err(JSError::new_typ(&ctx, "Expected 1 argument").unwrap());
+        return Err(JSError::new_typ(&ctx, "Expected 1 argument")?);
     }
 
-    let label = args[0].as_string().unwrap().to_string();
-    let encoding =
-        Encoding::for_label_no_replacement(label.as_bytes()).ok_or_else(|| {
-            JSError::new_typ(&ctx, format!("Unknown encoding label: {:?}", label))
-                .unwrap()
-        })?;
-
+    let label = args[0].as_string()?.to_string();
+    let encoding = match Encoding::for_label_no_replacement(label.as_bytes()) {
+        Some(enc) => enc,
+        None => {
+            return Err(JSError::new_typ(
+                &ctx,
+                format!("Unknown encoding label: {:?}", label),
+            )?)
+        }
+    };
     Ok(JSValue::string(&ctx, encoding.name().to_lowercase()))
 }
 
@@ -38,9 +41,10 @@ pub fn encoding_decode_utf8_once(
     _this: JSObject,
     args: &[JSValue],
 ) -> JSResult<JSValue> {
-    let data_arg = args
-        .get(0)
-        .ok_or_else(|| JSError::new_typ(&ctx, "Missing Buffer argument").unwrap())?;
+    let data_arg = match args.get(0) {
+        Some(arg) => arg,
+        None => return Err(JSError::new_typ(&ctx, "Missing Buffer argument")?),
+    };
     let bytes_data = JSArrayBuffer::from_object(data_arg.as_object()?);
     let bytes = bytes_data.bytes()?;
 
@@ -60,7 +64,11 @@ pub fn encoding_decode_utf8_once(
         bytes
     };
 
-    let string = JSValue::string(&ctx, JSString::from(buffer));
+    let string = match JSString::try_from(buffer) {
+        Ok(s) => s,
+        Err(_) => return Err(JSError::new_typ(&ctx, "Invalid UTF-8 sequence")?),
+    };
+    let string = JSValue::string(&ctx, string);
     Ok(string)
 }
 
@@ -71,38 +79,47 @@ pub fn encoding_decode_once(
     _this: JSObject,
     args: &[JSValue],
 ) -> JSResult<JSValue> {
-    let data_arg = args
-        .get(0)
-        .ok_or_else(|| JSError::new_typ(&ctx, "Missing Buffer argument").unwrap())?;
+    let data_arg = match args.get(0) {
+        Some(arg) => arg,
+        None => return Err(JSError::new_typ(&ctx, "Missing Buffer argument")?),
+    };
+    // .ok_or_else(|| JSError::new_typ(&ctx, "Missing Buffer argument"))?;
     let bytes_data = JSArrayBuffer::from_object(data_arg.as_object()?);
     let bytes = bytes_data.bytes()?;
 
-    let label = args
-        .get(1)
-        .ok_or_else(|| JSError::new_typ(&ctx, "Missing Label argument").unwrap())?
-        .as_string()?
-        .to_string();
-    let fatal = args
-        .get(2)
-        .ok_or_else(|| JSError::new_typ(&ctx, "Missing Fatal argument").unwrap())?
-        .as_boolean();
+    let label = match args.get(1) {
+        Some(arg) => arg.as_string()?.to_string(),
+        None => return Err(JSError::new_typ(&ctx, "Missing Label argument")?),
+    };
+    let fatal = match args.get(2) {
+        Some(arg) => arg.as_boolean(),
+        None => return Err(JSError::new_typ(&ctx, "Missing Fatal argument")?),
+    };
     let ignore_bom = args
         .get(3)
         .and_then(|arg| Some(arg.as_boolean()))
         .unwrap_or(false);
 
-    let encoding = Encoding::for_label(label.as_bytes()).ok_or_else(|| {
-        JSError::new_typ(&ctx, format!("Invalid encoding label: {}", label)).unwrap()
-    })?;
+    let encoding = match Encoding::for_label(label.as_bytes()) {
+        Some(enc) => enc,
+        None => {
+            return Err(JSError::new_typ(
+                &ctx,
+                format!("Invalid encoding label: {:?}", label),
+            )?)
+        }
+    };
+
     let mut decoder = if ignore_bom {
         encoding.new_decoder_without_bom_handling()
     } else {
         encoding.new_decoder_with_bom_removal()
     };
 
-    let max_buffer_length = decoder
-        .max_utf16_buffer_length(bytes.len())
-        .ok_or_else(|| JSError::new_typ(&ctx, "Invalid buffer length").unwrap())?;
+    let max_buffer_length = match decoder.max_utf16_buffer_length(bytes.len()) {
+        Some(len) => len,
+        None => return Err(JSError::new_typ(&ctx, "Invalid buffer length")?),
+    };
     let mut output = vec![0; max_buffer_length];
 
     if fatal {
@@ -116,10 +133,10 @@ pub fn encoding_decode_once(
                 ));
             }
             DecoderResult::OutputFull => {
-                return Err(JSError::new_typ(&ctx, "Output buffer is too small").unwrap());
+                return Err(JSError::new_typ(&ctx, "Output buffer is too small")?);
             }
             DecoderResult::Malformed(_, _) => {
-                return Err(JSError::new_typ(&ctx, "Malformed input").unwrap());
+                return Err(JSError::new_typ(&ctx, "Malformed input")?);
             }
         }
     } else {
@@ -132,7 +149,7 @@ pub fn encoding_decode_once(
                 ));
             }
             CoderResult::OutputFull => {
-                return Err(JSError::new_typ(&ctx, "Output buffer is too small").unwrap());
+                return Err(JSError::new_typ(&ctx, "Output buffer is too small")?);
             }
         }
     }
@@ -145,16 +162,18 @@ pub fn encoding_decode(
     _this: JSObject,
     args: &[JSValue],
 ) -> JSResult<JSValue> {
-    let decoder_arg = args
-        .get(0)
-        .ok_or_else(|| JSError::new_typ(&ctx, "Missing Decoder argument").unwrap())?
-        .as_object()?;
-    let mut text_decoder = downcast_ref::<InnerTextDecoder>(&decoder_arg)
-        .ok_or_else(|| JSError::new_typ(&ctx, "Invalid Decoder object").unwrap())?;
-
-    let data_arg = args
-        .get(1)
-        .ok_or_else(|| JSError::new_typ(&ctx, "Missing Buffer argument").unwrap())?;
+    let decoder_arg = match args.get(0) {
+        Some(arg) => arg.as_object()?,
+        None => return Err(JSError::new_typ(&ctx, "Missing Decoder argument")?),
+    };
+    let mut text_decoder = match downcast_ref::<InnerTextDecoder>(&decoder_arg) {
+        Some(decoder) => decoder,
+        None => return Err(JSError::new_typ(&ctx, "Invalid Decoder object")?),
+    };
+    let data_arg = match args.get(1) {
+        Some(arg) => arg,
+        None => return Err(JSError::new_typ(&ctx, "Missing Buffer argument")?),
+    };
     let stream = args
         .get(2)
         .and_then(|arg| Some(arg.as_boolean()))
@@ -162,13 +181,13 @@ pub fn encoding_decode(
     let bytes_data = JSArrayBuffer::from_object(data_arg.as_object()?);
     let fatal = text_decoder.fatal;
     let bytes = bytes_data.bytes()?;
-    let max_buffer_length = text_decoder
-        .decoder
-        .max_utf16_buffer_length(bytes.len())
-        .ok_or_else(|| JSError::new_typ(&ctx, "Invalid buffer length").unwrap())?;
+    let max_buffer_length =
+        match text_decoder.decoder.max_utf16_buffer_length(bytes.len()) {
+            Some(len) => len,
+            None => return Err(JSError::new_typ(&ctx, "Invalid buffer length")?),
+        };
 
     let mut output = vec![0; max_buffer_length];
-
     if fatal {
         let (result, _, written) = text_decoder
             .decoder
@@ -181,10 +200,10 @@ pub fn encoding_decode(
                 ));
             }
             DecoderResult::OutputFull => {
-                return Err(JSError::new_typ(&ctx, "Output buffer is too small").unwrap());
+                return Err(JSError::new_typ(&ctx, "Output buffer is too small")?);
             }
             DecoderResult::Malformed(_, _) => {
-                return Err(JSError::new_typ(&ctx, "Malformed input").unwrap());
+                return Err(JSError::new_typ(&ctx, "Malformed input")?);
             }
         }
     } else {
@@ -200,7 +219,7 @@ pub fn encoding_decode(
                 ));
             }
             CoderResult::OutputFull => {
-                return Err(JSError::new_typ(&ctx, "Output buffer is too small").unwrap());
+                return Err(JSError::new_typ(&ctx, "Output buffer is too small")?);
             }
         }
     }
@@ -213,10 +232,10 @@ pub fn encoding_encode(
     _this: JSObject,
     args: &[JSValue],
 ) -> JSResult<JSValue> {
-    let input = args
-        .get(0)
-        .ok_or_else(|| JSError::new_typ(&ctx, "Missing Input argument").unwrap())?
-        .as_string()?;
+    let input = match args.get(0) {
+        Some(arg) => arg.as_string()?,
+        None => return Err(JSError::new_typ(&ctx, "Missing Input argument")?),
+    };
 
     let mut bytes: ManuallyDrop<Vec<u8>> = ManuallyDrop::new(input.into());
     let output = JSTypedArray::with_bytes::<u8>(
@@ -257,27 +276,27 @@ pub fn encoding_exports(ctx: &JSContext, exports: &JSObject) {
             &encoding_for_label_no_replacement_fn,
             Default::default(),
         )
-        .unwrap();
+        .expect("Failed to set encoding property");
     exports
         .set_property("encoding_decode", &encoding_decode_fn, Default::default())
-        .unwrap();
+        .expect("Failed to set encoding property");
     exports
         .set_property(
             "encoding_decode_once",
             &encoding_decode_once_fn,
             Default::default(),
         )
-        .unwrap();
+        .expect("Failed to set encoding property");
     exports
         .set_property(
             "encoding_decode_utf8_once",
             &encoding_decode_utf8_once_fn,
             Default::default(),
         )
-        .unwrap();
+        .expect("Failed to set encoding property");
     exports
         .set_property("encoding_encode", &encoding_encode_fn, Default::default())
-        .unwrap();
+        .expect("Failed to set encoding property");
 }
 
 #[cfg(test)]

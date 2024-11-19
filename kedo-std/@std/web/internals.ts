@@ -1,4 +1,4 @@
-export { Headers, emptyHeader, fillHeadersMapFrom } from "./Headers";
+export { Headers, emptyHeader, headerInnerList, fillHeadersMapFrom } from "./Headers";
 export {
   AbortSignal,
   AbortController,

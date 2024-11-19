@@ -11,12 +11,19 @@ path = "src/lib.rs"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rust_jsc = "0.2.4"
+rust_jsc = "0.2.5"
 # rust_jsc = { path = "/Users/kcaicedo/Documents/Projects/rust-jsc" }
 tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7.12", features = ["codec", "io"] } 
 hyper = { version = "1", features = ["full"] }
+hyper-util = { version = "0.1", features = ["full"] }
+hyper-tls = { version = "0.6.0" }
+async-compression = { version = "0.4.17", features = ["tokio", "brotli", "zlib", "gzip", "zstd"] }
+http-body-util = "0.1.0"
 form_urlencoded = "1.2.1"
 encoding_rs = "0.8.34"
 url = "2.5.2"
 bytes = "1.7.1"
 futures = "0.3.30"
+base64 = "0.22.1"
+percent-encoding = "2.3.1"

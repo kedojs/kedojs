@@ -2,13 +2,19 @@ use rust_jsc::class::ClassError;
 use rust_jsc::{
     callback, constructor, finalize, JSClass, JSClassAttribute, JSContext, JSError,
     JSFunction, JSObject, JSPromise, JSResult, JSTypedArray, JSValue, PrivateData,
-    PropertyDescriptorBuilder,
 };
 
+use std::cell::RefCell;
+use std::convert::Infallible;
+use std::future::Future;
+use std::mem::ManuallyDrop;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::sync::oneshot;
+
+use futures::Stream;
 
 use crate::class_table::ClassTable;
 use crate::context::downcast_state;
@@ -36,25 +42,20 @@ impl std::fmt::Display for StreamError {
 }
 
 pub struct BoundedBufferChannel<T> {
-    sender: Sender<T>,
-    receiver: Receiver<T>,
-    close_notifier: Option<oneshot::Sender<()>>,
-    close_receiver: oneshot::Receiver<()>,
+    sender: Option<Sender<T>>,
+    receiver: Option<Receiver<T>>,
     is_closed: Arc<AtomicBool>,
 }
 
-impl<T: Clone + Send + 'static> BoundedBufferChannel<T> {
+impl<T> BoundedBufferChannel<T> {
     pub fn new(capacity: usize) -> Self {
         let (sender, receiver) = channel(capacity);
-
-        let (close_notifier, close_receiver) = oneshot::channel();
         let is_closed = Arc::new(AtomicBool::new(false));
+
         Self {
-            sender,
-            receiver,
-            close_notifier: Some(close_notifier),
-            close_receiver,
             is_closed,
+            sender: Some(sender),
+            receiver: Some(receiver),
         }
     }
 
@@ -63,69 +64,152 @@ impl<T: Clone + Send + 'static> BoundedBufferChannel<T> {
             return Err(StreamError::Closed);
         }
 
-        self.sender.try_send(item).map_err(|e| match e {
-            tokio::sync::mpsc::error::TrySendError::Full(_) => StreamError::ChannelFull,
-            _ => StreamError::SendError(e.to_string()),
-        })
+        self.sender
+            .as_ref()
+            .unwrap()
+            .try_send(item)
+            .map_err(|e| match e {
+                tokio::sync::mpsc::error::TrySendError::Full(_) => {
+                    StreamError::ChannelFull
+                }
+                _ => StreamError::SendError(e.to_string()),
+            })
     }
 
     pub async fn write_async(&mut self, item: T) -> Result<(), StreamError> {
-        if self.is_closed.load(Ordering::Relaxed) {
+        if self.is_closed.load(Ordering::Relaxed) || self.sender.is_none() {
             return Err(StreamError::Closed);
         }
 
-        tokio::select! {
-            biased;
-            _ = &mut self.close_receiver => {
-                self.close_receiver.close();
-                Err(StreamError::Closed)
-            },
-            _ = self.sender.send(item) => Ok(()),
-        }
+        self.sender
+            .as_ref()
+            .unwrap()
+            .send(item)
+            .await
+            .map_err(|e| StreamError::SendError(e.to_string()))
     }
 
     pub fn read(&mut self) -> Result<T, StreamError> {
-        if self.is_closed.load(Ordering::Relaxed) {
-            return Err(StreamError::Closed);
-        }
+        // if self.is_closed.load(Ordering::Relaxed) {
+        //     return Err(StreamError::Closed);
+        // }
 
-        self.receiver.try_recv().map_err(|e| match e {
-            tokio::sync::mpsc::error::TryRecvError::Empty => StreamError::Empty,
-            tokio::sync::mpsc::error::TryRecvError::Disconnected => StreamError::Closed,
-            _ => StreamError::SendError(e.to_string()),
-        })
+        // self.receiver.try_recv().map_err(|e| match e {
+        //     tokio::sync::mpsc::error::TryRecvError::Empty => StreamError::Empty,
+        //     tokio::sync::mpsc::error::TryRecvError::Disconnected => StreamError::Closed,
+        // })
+        match self.receiver.as_mut() {
+            Some(receiver) => receiver.try_recv().map_err(|e| match e {
+                tokio::sync::mpsc::error::TryRecvError::Empty => StreamError::Empty,
+                tokio::sync::mpsc::error::TryRecvError::Disconnected => {
+                    StreamError::Closed
+                }
+            }),
+            None => Err(StreamError::Closed),
+        }
     }
 
     pub async fn read_async(&mut self) -> Result<Option<T>, StreamError> {
-        if self.is_closed.load(Ordering::Relaxed) {
-            return Err(StreamError::Closed);
+        // if self.is_closed.load(Ordering::Relaxed) {
+        //     return Err(StreamError::Closed);
+        // }
+
+        let receiver = self.receiver.as_mut().ok_or(StreamError::Closed)?;
+        if self.is_closed.load(Ordering::Relaxed) && receiver.is_empty() {
+            return Ok(None);
         }
 
         tokio::select! {
             biased;
-            _ = &mut self.close_receiver => {
-                self.close_receiver.close();
-                Err(StreamError::Closed)
-            },
-            msg = self.receiver.recv() => Ok(msg),
+            msg = receiver.recv() => Ok(msg),
+            // self.receiver.recv() => Ok(msg)
+            // _ = &mut self.close_receiver => {
+            //     self.close_receiver.close();
+            //     Err(StreamError::Closed)
+            // },
+        }
+    }
+
+    pub fn new_reader(&mut self) -> Option<BoundedBufferChannelReader<T>> {
+        if let Some(receiver) = self.receiver.take() {
+            Some(BoundedBufferChannelReader { receiver })
+        } else {
+            None
         }
     }
 
     pub fn close(&mut self) {
         self.is_closed.store(true, Ordering::Relaxed);
-        self.receiver.close();
-        self.close_notifier.take().and_then(|tx| tx.send(()).ok());
+        self.sender.take();
     }
 }
 
-pub struct ReadableStreamResource<T> {
-    channel: BoundedBufferChannel<T>,
+#[derive(Debug)]
+pub struct BoundedBufferChannelReader<T> {
+    receiver: Receiver<T>,
 }
 
-impl<T: Clone + Send + 'static> ReadableStreamResource<T> {
+impl<T> BoundedBufferChannelReader<T> {
+    pub fn read(&mut self) -> Result<T, StreamError> {
+        self.receiver.try_recv().map_err(|e| match e {
+            tokio::sync::mpsc::error::TryRecvError::Empty => StreamError::Empty,
+            tokio::sync::mpsc::error::TryRecvError::Disconnected => StreamError::Closed,
+        })
+    }
+
+    pub async fn read_async(&mut self) -> Result<Option<T>, StreamError> {
+        tokio::select! {
+            biased;
+            msg = self.receiver.recv() => Ok(msg),
+        }
+    }
+}
+
+impl<T> Stream for BoundedBufferChannelReader<T> {
+    type Item = Result<T, Infallible>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        // Safety: We're not moving the struct; we're only accessing its fields.
+        let self_mut = unsafe { self.get_unchecked_mut() };
+
+        // Pin the receiver since `poll_recv` requires a `Pin<&mut Receiver<T>>`.
+        let mut receiver = Pin::new(&mut self_mut.receiver);
+
+        // Poll the receiver for the next item.
+        match receiver.poll_recv(cx) {
+            Poll::Ready(Some(item)) => Poll::Ready(Some(Ok(item))),
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+pub struct InternalStreamResource<T> {
+    channel: BoundedBufferChannel<T>,
+    handle: StreamCompletion,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct StreamCompletion {
+    inner: std::rc::Rc<RefCell<StreamCompletionInner>>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct StreamCompletionInner {
+    closed: bool,
+    waker: Option<std::task::Waker>,
+}
+
+#[derive(Debug)]
+pub struct InternalStreamResourceReader<T> {
+    reader: BoundedBufferChannelReader<T>,
+}
+
+impl<T> InternalStreamResource<T> {
     pub fn new(capacity: usize) -> Self {
         Self {
             channel: BoundedBufferChannel::new(capacity),
+            handle: StreamCompletion::default(),
         }
     }
 
@@ -145,49 +229,102 @@ impl<T: Clone + Send + 'static> ReadableStreamResource<T> {
         self.channel.read_async().await
     }
 
+    pub fn new_reader(&mut self) -> Option<InternalStreamResourceReader<T>> {
+        self.channel
+            .new_reader()
+            .map(|reader| InternalStreamResourceReader { reader })
+    }
+
     pub fn close(&mut self) {
-        self.channel.close()
+        self.channel.close();
+        self.handle.close();
+    }
+
+    // pub fn completion(&self) -> StreamCompletion {
+    //     return self.handle.clone();
+    // }
+
+    pub async fn wait_close(&mut self) -> Result<(), StreamError> {
+        self.handle.clone().await
+    }
+}
+
+impl StreamCompletion {
+    pub fn close(&mut self) {
+        let mut mut_ref = self.inner.borrow_mut();
+        mut_ref.closed = true;
+        if let Some(waker) = mut_ref.waker.take() {
+            waker.wake();
+        }
     }
 
     pub fn is_closed(&self) -> bool {
-        self.channel.is_closed.load(Ordering::Relaxed)
+        self.inner.borrow_mut().closed
+    }
+
+    pub fn set_waker(&mut self, waker: std::task::Waker) {
+        self.inner.borrow_mut().waker = Some(waker);
     }
 }
 
-pub struct JSReadableStreamResource {
-    inner: JSObject,
-    pull_algorithm: Option<JSFunction>,
+impl Future for StreamCompletion {
+    type Output = Result<(), StreamError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if self.is_closed() {
+            Poll::Ready(Ok(()))
+        } else {
+            let self_mut = unsafe { self.get_unchecked_mut() };
+            self_mut.set_waker(cx.waker().clone());
+            Poll::Pending
+        }
+    }
 }
+
+impl<T> InternalStreamResourceReader<T> {
+    pub fn read(&mut self) -> Result<T, StreamError> {
+        self.reader.read()
+    }
+
+    pub async fn read_async(&mut self) -> Result<Option<T>, StreamError> {
+        self.reader.read_async().await
+    }
+
+    pub fn take(self) -> BoundedBufferChannelReader<T> {
+        self.reader
+    }
+}
+
+impl<T> Stream for InternalStreamResourceReader<T> {
+    type Item = Result<T, Infallible>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        // Safety: We're not moving the struct; we're only accessing its fields.
+        let self_mut = unsafe { self.get_unchecked_mut() };
+
+        // Pin the receiver since `poll_recv` requires a `Pin<&mut Receiver<T>>`.
+        let mut receiver = Pin::new(&mut self_mut.reader.receiver);
+
+        // Poll the receiver for the next item.
+        match receiver.poll_recv(cx) {
+            Poll::Ready(Some(item)) => Poll::Ready(Some(Ok(item))),
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl<T> Drop for InternalStreamResource<T> {
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
+pub struct JSReadableStreamResource {}
 
 impl JSReadableStreamResource {
-    pub const CLASS_NAME: &'static str = "JSReadableStreamResource";
-    pub const PROTO_NAME: &'static str = "JSReadableStreamResourcePrototype";
-
-    pub fn from_object(ctx: &JSContext, object: JSObject) -> JSResult<Self> {
-        let pull_algorithm = object.get_property("pullAlgorithm")?.as_object()?;
-        if !pull_algorithm.is_function() {
-            return Err(JSError::new_typ(ctx, "pullAlgorithm must be a function")?);
-        }
-
-        let pull_algorithm = JSFunction::from(pull_algorithm);
-        Ok(Self {
-            inner: object,
-            pull_algorithm: Some(pull_algorithm),
-        })
-    }
-
-    pub fn pull_next(&self) -> JSResult<()> {
-        // let stream_resource =
-        //     downcast_ref::<ReadableStreamResource<Vec<u8>>>(&self.inner).unwrap();
-        if let Some(pull_algorithm) = &self.pull_algorithm {
-            let result = pull_algorithm.call(Some(&self.inner), &[]);
-            if result.is_err() {
-                return Err(result.unwrap_err());
-            }
-        }
-
-        Ok(())
-    }
+    pub const CLASS_NAME: &'static str = "ReadableStreamResource";
+    pub const PROTO_NAME: &'static str = "ReadableStreamResourcePrototype";
 
     pub fn init_proto(
         proto_manager: &mut ProtoTable,
@@ -195,8 +332,7 @@ impl JSReadableStreamResource {
         ctx: &JSContext,
     ) -> Result<(), ClassError> {
         let class = manager.get(JSReadableStreamResource::CLASS_NAME).unwrap();
-        let template_object = class.object::<ReadableStreamResource<Vec<u8>>>(ctx, None);
-        JSReadableStreamResource::set_properties(ctx, &template_object).unwrap();
+        let template_object = class.object::<InternalStreamResource<Vec<u8>>>(ctx, None);
         proto_manager.insert(
             JSReadableStreamResource::PROTO_NAME.to_string(),
             template_object,
@@ -235,7 +371,7 @@ impl JSReadableStreamResource {
     /// This is the place to clean up any resources that the object may hold.
     #[finalize]
     fn finalize(data_ptr: PrivateData) {
-        drop_ptr::<ReadableStreamResource<Vec<u8>>>(data_ptr);
+        drop_ptr::<InternalStreamResource<Vec<u8>>>(data_ptr);
     }
 
     #[constructor]
@@ -250,12 +386,6 @@ impl JSReadableStreamResource {
                 JSError::new_typ(&ctx, "Missing highWaterMark argument").unwrap()
             })?
             .as_number()?;
-        let pull_algorithm = args
-            .get(1)
-            .ok_or_else(|| {
-                JSError::new_typ(&ctx, "Missing pull algorithm argument").unwrap()
-            })?
-            .as_object()?;
 
         let state = downcast_state::<AsyncJobQueue>(&ctx);
         let class = state
@@ -263,213 +393,382 @@ impl JSReadableStreamResource {
             .get(JSReadableStreamResource::CLASS_NAME)
             .unwrap();
 
-        let stream_resource = ReadableStreamResource::new(high_water_mark as usize);
-        let object = class.object::<ReadableStreamResource<Vec<u8>>>(
+        let stream_resource = InternalStreamResource::new(high_water_mark as usize);
+        let object = class.object::<InternalStreamResource<Vec<u8>>>(
             &ctx,
             Some(Box::new(stream_resource)),
         );
 
-        object.set_property("pullAlgorithm", &pull_algorithm, Default::default())?;
         object.set_prototype(&constructor);
         Ok(object.into())
     }
+}
 
-    #[callback]
-    fn read(
-        ctx: JSContext,
-        _: JSObject,
-        this: JSObject,
-        _: &[JSValue],
-    ) -> JSResult<JSValue> {
-        let state = downcast_state::<AsyncJobQueue>(&ctx);
-        let resource = downcast_ref::<ReadableStreamResource<Vec<u8>>>(&this);
-        let mut readable_stream = if let Some(stream) = resource {
-            stream
-        } else {
-            return Err(JSError::new_typ(&ctx, "Invalid this object").unwrap());
-        };
+#[callback]
+pub fn op_read_readable_stream(
+    ctx: JSContext,
+    _: JSObject,
+    _: JSObject,
+    args: &[JSValue],
+) -> JSResult<JSValue> {
+    let resource_args = args
+        .get(0)
+        .ok_or_else(|| JSError::new_typ(&ctx, "Missing arguments").unwrap())?
+        .as_object()?;
+    let state = downcast_state::<AsyncJobQueue>(&ctx);
+    let resource = downcast_ref::<InternalStreamResource<Vec<u8>>>(&resource_args);
+    let mut readable_stream = resource.ok_or_else(|| {
+        JSError::new_typ(&ctx, "Invalid internal resource object").unwrap()
+    })?;
 
-        let (promise, resolver) = JSPromise::new_pending(&ctx)?;
-        let future = async move {
-            let result = readable_stream.read_async().await;
-            NativeJob::new(move |ctx| {
-                match result {
-                    Ok(bytes) => {
-                        let chunk = if let Some(mut bytes) = bytes {
-                            JSTypedArray::with_bytes(
-                                ctx,
-                                bytes.as_mut_slice(),
-                                rust_jsc::JSTypedArrayType::Uint8Array,
-                            )?
-                            .into()
-                        } else {
-                            JSValue::undefined(ctx)
-                        };
-                        resolver.resolve(None, &[chunk])?;
-                    }
-                    Err(err) => {
-                        let err_value =
-                            JSError::with_message(ctx, format!("{}", err)).unwrap();
-                        resolver.reject(None, &[err_value.into()])?;
-                    }
+    let (promise, resolver) = JSPromise::new_pending(&ctx)?;
+    let future = async move {
+        let result = readable_stream.read_async().await;
+        NativeJob::new(move |ctx| {
+            match result {
+                Ok(bytes) => {
+                    let chunk = if let Some(bytes) = bytes {
+                        let mut bytes = ManuallyDrop::new(bytes);
+                        JSTypedArray::with_bytes(
+                            ctx,
+                            bytes.as_mut_slice(),
+                            rust_jsc::JSTypedArrayType::Uint8Array,
+                        )?
+                        .into()
+                    } else {
+                        JSValue::undefined(ctx)
+                    };
+                    resolver.resolve(None, &[chunk])?;
                 }
-                Ok(())
-            })
-        };
-
-        state.job_queue().borrow().spawn(Box::pin(future));
-        Ok(promise.into())
-    }
-
-    #[callback]
-    fn read_sync(
-        ctx: JSContext,
-        _: JSObject,
-        this: JSObject,
-        _: &[JSValue],
-    ) -> JSResult<JSValue> {
-        let resource = downcast_ref::<ReadableStreamResource<Vec<u8>>>(&this);
-        let mut readable_stream = if let Some(stream) = resource {
-            stream
-        } else {
-            return Err(JSError::new_typ(&ctx, "Invalid this object").unwrap());
-        };
-
-        match readable_stream.read() {
-            Ok(mut bytes) => {
-                let typed_array = JSTypedArray::with_bytes(
-                    &ctx,
-                    bytes.as_mut_slice(),
-                    rust_jsc::JSTypedArrayType::Int8Array,
-                )?;
-                Ok(typed_array.into())
+                Err(err) => {
+                    let err_value =
+                        JSError::with_message(ctx, format!("{}", err)).unwrap();
+                    resolver.reject(None, &[err_value.into()])?;
+                }
             }
-            Err(_) => Ok(JSValue::undefined(&ctx)),
+            Ok(())
+        }).set_name("op_read_readable_stream")
+    };
+
+    state.job_queue().borrow().spawn(Box::pin(future));
+    Ok(promise.into())
+}
+
+#[callback]
+fn op_read_sync_readable_stream(
+    ctx: JSContext,
+    _: JSObject,
+    _: JSObject,
+    args: &[JSValue],
+) -> JSResult<JSValue> {
+    let resource_args = args
+        .get(0)
+        .ok_or_else(|| JSError::new_typ(&ctx, "Missing arguments").unwrap())?
+        .as_object()?;
+    let resource = downcast_ref::<InternalStreamResource<Vec<u8>>>(&resource_args);
+    let mut readable_stream = resource.ok_or_else(|| {
+        JSError::new_typ(&ctx, "Invalid internal resource object").unwrap()
+    })?;
+
+    match readable_stream.read() {
+        Ok(bytes) => {
+            let mut bytes = ManuallyDrop::new(bytes);
+            let typed_array = JSTypedArray::with_bytes(
+                &ctx,
+                bytes.as_mut_slice(),
+                rust_jsc::JSTypedArrayType::Int8Array,
+            )?;
+            Ok(typed_array.into())
         }
+        Err(_) => Ok(JSValue::undefined(&ctx)),
     }
+}
 
-    #[callback]
-    fn write_sync(
-        ctx: JSContext,
-        _: JSObject,
-        this: JSObject,
-        args: &[JSValue],
-    ) -> JSResult<JSValue> {
-        let resource = downcast_ref::<ReadableStreamResource<Vec<u8>>>(&this);
-        let readable_stream = if let Some(stream) = resource {
-            stream
-        } else {
-            return Err(JSError::new_typ(&ctx, "Invalid this object").unwrap());
-        };
+#[callback]
+fn op_write_sync_readable_stream(
+    ctx: JSContext,
+    _: JSObject,
+    _: JSObject,
+    args: &[JSValue],
+) -> JSResult<JSValue> {
+    let resource_args = args
+        .get(0)
+        .ok_or_else(|| JSError::new_typ(&ctx, "Missing arguments").unwrap())?
+        .as_object()?;
+    let resource = downcast_ref::<InternalStreamResource<Vec<u8>>>(&resource_args);
+    let readable_stream = resource.ok_or_else(|| {
+        JSError::new_typ(&ctx, "Invalid internal resource object").unwrap()
+    })?;
 
-        let chunk = args
-            .get(0)
-            .ok_or_else(|| JSError::new_typ(&ctx, "Missing chunk argument").unwrap())?
-            .as_object()?;
-        let typed_array = JSTypedArray::from_value(&chunk)?;
-        let bytes = typed_array.as_vec::<u8>()?;
-        let len = bytes.len() as f64;
+    let chunk = args
+        .get(1)
+        .ok_or_else(|| JSError::new_typ(&ctx, "Missing chunk argument").unwrap())?
+        .as_object()?;
+    let typed_array = JSTypedArray::from_value(&chunk)?;
+    let bytes = typed_array.as_vec::<u8>()?;
+    let len = bytes.len() as f64;
 
-        match readable_stream.write(bytes) {
-            Ok(_) => Ok(JSValue::number(&ctx, len).into()),
-            Err(e) => Err(JSError::new_typ(&ctx, e.to_string()).unwrap()),
-        }
+    match readable_stream.write(bytes) {
+        Ok(_) => Ok(JSValue::number(&ctx, len).into()),
+        Err(e) => Err(JSError::new_typ(&ctx, e.to_string()).unwrap()),
     }
+}
 
-    #[callback]
-    fn write(
-        ctx: JSContext,
-        _: JSObject,
-        this: JSObject,
-        args: &[JSValue],
-    ) -> JSResult<JSValue> {
-        let state = downcast_state::<AsyncJobQueue>(&ctx);
-        let resource = downcast_ref::<ReadableStreamResource<Vec<u8>>>(&this);
-        let mut readable_stream = if let Some(stream) = resource {
-            stream
-        } else {
-            return Err(JSError::new_typ(&ctx, "Invalid this object").unwrap());
-        };
+#[callback]
+fn op_write_readable_stream(
+    ctx: JSContext,
+    _: JSObject,
+    this: JSObject,
+    args: &[JSValue],
+) -> JSResult<JSValue> {
+    let state = downcast_state::<AsyncJobQueue>(&ctx);
+    let resource_args = args
+        .get(0)
+        .ok_or_else(|| JSError::new_typ(&ctx, "Missing arguments").unwrap())?
+        .as_object()?;
+    let resource = downcast_ref::<InternalStreamResource<Vec<u8>>>(&resource_args);
+    let mut readable_stream = resource.ok_or_else(|| {
+        JSError::new_typ(&ctx, "Invalid internal resource object").unwrap()
+    })?;
 
-        let chunk = args
-            .get(0)
-            .ok_or_else(|| JSError::new_typ(&ctx, "Missing chunk argument").unwrap())?
-            .as_object()?;
-        let typed_array = JSTypedArray::from_value(&chunk)?;
-        let bytes = typed_array.as_vec::<u8>()?;
-        let len = bytes.len() as f64;
+    let chunk = args
+        .get(1)
+        .ok_or_else(|| JSError::new_typ(&ctx, "Missing chunk argument").unwrap())?
+        .as_object()?;
+    let typed_array = JSTypedArray::from_value(&chunk)?;
+    let bytes = typed_array.as_vec::<u8>()?;
+    let len = bytes.len() as f64;
 
-        let (promise, resolver) = JSPromise::new_pending(&ctx)?;
-        let future = async move {
-            let result = readable_stream.write_async(bytes).await;
-            NativeJob::new(move |ctx| {
-                match result {
-                    Ok(_) => {
-                        resolver.resolve(Some(&this), &[JSValue::number(ctx, len)])?;
+    let (promise, resolver) = JSPromise::new_pending(&ctx)?;
+    let future = async move {
+        let result = readable_stream.write_async(bytes).await;
+        NativeJob::new(move |ctx| {
+            match result {
+                Ok(_) => {
+                    resolver.resolve(Some(&this), &[JSValue::number(ctx, len)])?;
+                }
+                Err(err) => match err {
+                    StreamError::Closed => {
+                        resolver
+                            .resolve(Some(&this), &[JSValue::number(ctx, -1 as f64)])?;
                     }
-                    Err(err) => {
+                    _ => {
                         let err_value =
                             JSError::with_message(ctx, format!("{}", err)).unwrap();
                         resolver.reject(Some(&this), &[err_value.into()])?;
                     }
+                },
+            }
+            Ok(())
+        })
+        .set_name("op_write_readable_stream")
+    };
+
+    state.job_queue().borrow().spawn(Box::pin(future));
+    Ok(promise.into())
+}
+
+#[callback]
+fn op_close_readable_stream(
+    ctx: JSContext,
+    _: JSObject,
+    _: JSObject,
+    args: &[JSValue],
+) -> JSResult<JSValue> {
+    let resource_args = args
+        .get(0)
+        .ok_or_else(|| JSError::new_typ(&ctx, "Missing arguments").unwrap())?
+        .as_object()?;
+    let resource = downcast_ref::<InternalStreamResource<Vec<u8>>>(&resource_args);
+    let mut readable_stream = resource.ok_or_else(|| {
+        JSError::new_typ(&ctx, "Invalid internal resource object").unwrap()
+    })?;
+
+    readable_stream.close();
+    Ok(JSValue::undefined(&ctx))
+}
+
+#[callback]
+fn op_wait_close_readable_stream(
+    ctx: JSContext,
+    _: JSObject,
+    _: JSObject,
+    args: &[JSValue],
+) -> JSResult<JSValue> {
+    let resource_args = args
+        .get(0)
+        .ok_or_else(|| JSError::new_typ(&ctx, "Missing arguments").unwrap())?
+        .as_object()?;
+    let resource = downcast_ref::<InternalStreamResource<Vec<u8>>>(&resource_args);
+    let mut readable_stream = resource.ok_or_else(|| {
+        JSError::new_typ(&ctx, "Invalid internal resource object").unwrap()
+    })?;
+    let should_block = args
+        .get(1)
+        .and_then(|arg| Some(arg.as_boolean()))
+        .unwrap_or(true);
+
+    let (promise, resolver) = JSPromise::new_pending(&ctx)?;
+    let future = async move {
+        let result = readable_stream.wait_close().await;
+        NativeJob::new(move |ctx| {
+            match result {
+                Ok(_) => {
+                    resolver.resolve(None, &[])?;
                 }
-                Ok(())
-            })
-        };
+                Err(err) => {
+                    let err_value =
+                        JSError::with_message(ctx, format!("{}", err)).unwrap();
+                    resolver.reject(None, &[err_value.into()])?;
+                }
+            }
+            Ok(())
+        }).set_name("op_wait_close_readable_stream")
+    };
 
-        state.job_queue().borrow().spawn(Box::pin(future));
-        Ok(promise.into())
-    }
+    let binding = downcast_state::<AsyncJobQueue>(&ctx);
+    let queue = binding.job_queue().borrow();
+    match should_block {
+        true => queue.spawn(Box::pin(future)),
+        false => queue.spawn_non_blocking(Box::pin(future)),
+    };
 
-    #[callback]
-    fn close(
-        ctx: JSContext,
-        _: JSObject,
-        this: JSObject,
-        _: &[JSValue],
-    ) -> JSResult<JSValue> {
-        let resource = downcast_ref::<ReadableStreamResource<Vec<u8>>>(&this);
-        let mut readable_stream = if let Some(stream) = resource {
-            stream
-        } else {
-            return Err(JSError::new_typ(&ctx, "Invalid this object").unwrap());
-        };
+    Ok(promise.into())
+}
 
-        readable_stream.close();
-        Ok(JSValue::undefined(&ctx))
-    }
+pub fn readable_stream_exports(ctx: &JSContext, exports: &JSObject) {
+    let op_read_readable_stream_fn = JSFunction::callback(
+        ctx,
+        Some("op_read_readable_stream"),
+        Some(op_read_readable_stream),
+    );
 
-    fn set_properties(ctx: &JSContext, this: &JSObject) -> JSResult<()> {
-        let descriptor = PropertyDescriptorBuilder::new()
-            .writable(false)
-            .enumerable(false)
-            .configurable(false)
-            .build();
+    let op_read_sync_readable_stream_fn = JSFunction::callback(
+        ctx,
+        Some("op_read_sync_readable_stream"),
+        Some(op_read_sync_readable_stream),
+    );
 
-        let function = JSFunction::callback(&ctx, Some("writeChunk"), Some(Self::write));
-        this.set_property("writeChunk", &function, descriptor)?;
+    let op_write_readable_stream_fn = JSFunction::callback(
+        ctx,
+        Some("op_write_readable_stream"),
+        Some(op_write_readable_stream),
+    );
 
-        let function =
-            JSFunction::callback(&ctx, Some("writeChunkSync"), Some(Self::write_sync));
-        this.set_property("writeChunkSync", &function, descriptor)?;
+    let op_write_sync_readable_stream_fn = JSFunction::callback(
+        ctx,
+        Some("op_write_sync_readable_stream"),
+        Some(op_write_sync_readable_stream),
+    );
 
-        let function = JSFunction::callback(&ctx, Some("readChunk"), Some(Self::read));
-        this.set_property("readChunk", &function, descriptor)?;
+    let op_close_readable_stream_fn = JSFunction::callback(
+        ctx,
+        Some("op_close_readable_stream"),
+        Some(op_close_readable_stream),
+    );
 
-        let function =
-            JSFunction::callback(&ctx, Some("readChunkSync"), Some(Self::read_sync));
-        this.set_property("readChunkSync", &function, descriptor)?;
+    let op_wait_close_readable_stream_fn = JSFunction::callback(
+        ctx,
+        Some("op_wait_close_readable_stream"),
+        Some(op_wait_close_readable_stream),
+    );
 
-        let function = JSFunction::callback(&ctx, Some("close"), Some(Self::close));
-        this.set_property("close", &function, descriptor)?;
+    // Exports
+    JSReadableStreamResource::template_object(ctx, exports).unwrap();
 
-        Ok(())
-    }
+    exports
+        .set_property(
+            "op_read_readable_stream",
+            &op_read_readable_stream_fn,
+            Default::default(),
+        )
+        .unwrap();
+    exports
+        .set_property(
+            "op_read_sync_readable_stream",
+            &op_read_sync_readable_stream_fn,
+            Default::default(),
+        )
+        .unwrap();
+    exports
+        .set_property(
+            "op_write_readable_stream",
+            &op_write_readable_stream_fn,
+            Default::default(),
+        )
+        .unwrap();
+    exports
+        .set_property(
+            "op_write_sync_readable_stream",
+            &op_write_sync_readable_stream_fn,
+            Default::default(),
+        )
+        .unwrap();
+    exports
+        .set_property(
+            "op_close_readable_stream",
+            &op_close_readable_stream_fn,
+            Default::default(),
+        )
+        .unwrap();
+    exports
+        .set_property(
+            "op_wait_close_readable_stream",
+            &op_wait_close_readable_stream_fn,
+            Default::default(),
+        )
+        .unwrap();
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::tests::test_utils::new_runtime;
+
     use super::*;
+
+    #[test]
+    fn test_internal_stream_resource() {
+        let mut stream = InternalStreamResource::<Vec<u8>>::new(5);
+        for i in 0..5 {
+            stream.write(vec![i as u8]).unwrap();
+        }
+
+        assert_eq!(stream.read().unwrap(), vec![0]);
+        assert_eq!(stream.read().unwrap(), vec![1]);
+        assert_eq!(stream.read().unwrap(), vec![2]);
+        assert_eq!(stream.read().unwrap(), vec![3]);
+        assert_eq!(stream.read().unwrap(), vec![4]);
+    }
+
+    #[tokio::test]
+    async fn test_internal_stream_resource_async() {
+        let mut stream = InternalStreamResource::<Vec<u8>>::new(5);
+        for i in 0..5 {
+            stream.write_async(vec![i as u8]).await.unwrap();
+        }
+
+        assert_eq!(stream.read_async().await.unwrap(), Some(vec![0]));
+        assert_eq!(stream.read_async().await.unwrap(), Some(vec![1]));
+        assert_eq!(stream.read_async().await.unwrap(), Some(vec![2]));
+        assert_eq!(stream.read_async().await.unwrap(), Some(vec![3]));
+        assert_eq!(stream.read_async().await.unwrap(), Some(vec![4]));
+    }
+
+    #[tokio::test]
+    async fn test_internal_stream_resource_async_close() {
+        let mut stream = InternalStreamResource::<Vec<u8>>::new(5);
+        for i in 0..5 {
+            stream.write_async(vec![i as u8]).await.unwrap();
+        }
+
+        stream.close();
+        let result = stream.read_async().await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), Some(vec![0]));
+        let result = stream.write_async(vec![5]).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), StreamError::Closed);
+    }
 
     #[test]
     fn test_bounded_buffer_channel() {
@@ -486,6 +785,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_internal_stream_resource_wait_close() {
+        let stream = InternalStreamResource::<Vec<u8>>::new(5);
+        for i in 0..5 {
+            stream.write(vec![i as u8]).unwrap();
+        }
+
+        let box_stream = Box::new(stream);
+        let raw_ptr = Box::into_raw(box_stream);
+
+        let wait_close_future = async {
+            let wait_future = unsafe { (*raw_ptr).wait_close() };
+            wait_future.await.unwrap();
+        };
+
+        let close_future = async {
+            unsafe { (*raw_ptr).close() };
+        };
+
+        tokio::join!(wait_close_future, close_future);
+    }
+
+    #[tokio::test]
     async fn test_bounded_buffer_channel_async() {
         let mut channel = BoundedBufferChannel::<Vec<u8>>::new(5);
         for i in 0..5 {
@@ -497,6 +818,36 @@ mod tests {
         assert_eq!(channel.read_async().await.unwrap(), Some(vec![2]));
         assert_eq!(channel.read_async().await.unwrap(), Some(vec![3]));
         assert_eq!(channel.read_async().await.unwrap(), Some(vec![4]));
+    }
+
+    #[test]
+    fn test_bounded_buffer_channel_reader() {
+        let mut channel = BoundedBufferChannel::<Vec<u8>>::new(5);
+        for i in 0..5 {
+            channel.write(vec![i as u8]).unwrap();
+        }
+
+        let mut reader = channel.new_reader().unwrap();
+        assert_eq!(reader.read().unwrap(), vec![0]);
+        assert_eq!(reader.read().unwrap(), vec![1]);
+        assert_eq!(reader.read().unwrap(), vec![2]);
+        assert_eq!(reader.read().unwrap(), vec![3]);
+        assert_eq!(reader.read().unwrap(), vec![4]);
+    }
+
+    #[tokio::test]
+    async fn test_bounded_buffer_channel_reader_async() {
+        let mut channel = BoundedBufferChannel::<Vec<u8>>::new(5);
+        for i in 0..5 {
+            channel.write_async(vec![i as u8]).await.unwrap();
+        }
+
+        let mut reader = channel.new_reader().unwrap();
+        assert_eq!(reader.read_async().await.unwrap(), Some(vec![0]));
+        assert_eq!(reader.read_async().await.unwrap(), Some(vec![1]));
+        assert_eq!(reader.read_async().await.unwrap(), Some(vec![2]));
+        assert_eq!(reader.read_async().await.unwrap(), Some(vec![3]));
+        assert_eq!(reader.read_async().await.unwrap(), Some(vec![4]));
     }
 
     #[tokio::test]
@@ -525,5 +876,68 @@ mod tests {
         let result = channel.write(vec![5]);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), StreamError::ChannelFull);
+    }
+
+    // Readable Stream Resource tests
+    #[tokio::test]
+    async fn test_readable_stream_resource() {
+        let mut rt = new_runtime();
+        let result = rt.evaluate_module_from_source(
+            r#"
+            import {
+                ReadableStreamResource,
+                op_read_sync_readable_stream,
+                op_write_sync_readable_stream
+            } from '@kedo/internal/utils';
+            import { ReadableStream } from "@kedo/stream";
+            import assert from "@kedo/assert";
+
+            const autoAllocateStream = new ReadableStream({
+              start(controller) {
+                this.counter = 0;
+              },
+              pull(controller) {
+                if (this.counter < 3) {
+                  const chunk = new Uint8Array(1);
+                  chunk[0] = this.counter;
+                  controller.byobRequest.respondWithNewView(chunk);
+                  this.counter++;
+                } else {
+                  controller.close();
+                }
+              },
+              type: "bytes",
+              autoAllocateChunkSize: 1,
+            });
+
+            const resource = new ReadableStreamResource(100);
+            const reader = autoAllocateStream.getReader();
+            for (let i = 0; i < 3; i++) {
+                const { value, done } = await reader.read();
+                if (done) {
+                    break;
+                }
+                op_write_sync_readable_stream(resource, value);
+            }
+
+            let result = op_read_sync_readable_stream(resource);
+            assert.ok(result[0] === 0, `Expected 0, got ${result}`);
+            result = op_read_sync_readable_stream(resource);
+            assert.ok(result[0] === 1, `Expected 1, got ${result}`);
+            result = op_read_sync_readable_stream(resource);
+            assert.ok(result[0] === 2, `Expected 2, got ${result}`);
+            result = op_read_sync_readable_stream(resource);
+            assert.ok(result === undefined, `Expected undefined, got ${result}`);
+            "#,
+            "index.js",
+            None,
+        );
+
+        if let Err(e) = result {
+            panic!("{}", e.message().unwrap());
+        }
+
+        rt.idle().await;
+        assert!(result.is_ok());
     }
 }
