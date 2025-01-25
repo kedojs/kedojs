@@ -1,11 +1,21 @@
-const { readFileSync, writeFileSync, rmSync } = require('node:fs');
+const { readFileSync, writeFileSync, rmSync } = require("node:fs");
 
-for (let i = 0; i < 100; i++) {
-    const content = readFileSync('./local/examples/fs/data.txt', { encoding: 'utf8' });
-    console.log(content);
+for (let i = 0; i < 4000; i++) {
+  const content = readFileSync(
+    "/Users/kcaicedo/Documents/Projects/kedojs/local/examples/fs/data.txt",
+    {
+      encoding: "utf8",
+    },
+  );
 
-    writeFileSync(`./local/examples/fs/mocks/data-bun-${i}.txt`, content)
-    console.log("Content written to file");
+  writeFileSync(
+    `/Users/kcaicedo/Documents/Projects/kedojs/local/examples/data-${i}.txt`,
+    content,
+  );
 
-    rmSync(`./local/examples/fs/mocks/data-bun-${i}.txt`);
+  rmSync(
+    `/Users/kcaicedo/Documents/Projects/kedojs/local/examples/data-${i}.txt`,
+  );
 }
+
+console.log("Multiple ReadFileSync test passed.\n");

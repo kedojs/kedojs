@@ -1,11 +1,25 @@
-import { readFile, writeFile, rm } from 'node:fs/promises';
+import { readFile, rm, writeFile } from "node:fs/promises";
 
-for (let i = 0; i < 100; i++) {
-    const content = await readFile('./local/examples/fs/data.txt', { encoding: 'utf8' });
-    console.log(content);
+async function readFiles(i) {
+  const content = await readFile(
+    "/Users/kcaicedo/Documents/Projects/kedojs/local/examples/fs/data.txt",
+    { encoding: "utf8" },
+  );
 
-    await writeFile(`./local/examples/fs/mocks/data-bun-${i}.txt`, content)
-    console.log("Content written to file");
+  await writeFile(
+    `/Users/kcaicedo/Documents/Projects/kedojs/local/examples/mocks/data-bun-${i}.txt`,
+    content,
+  );
 
-    rm(`./local/examples/fs/mocks/data-bun-${i}.txt`);
+  await rm(
+    `/Users/kcaicedo/Documents/Projects/kedojs/local/examples/mocks/data-bun-${i}.txt`,
+  );
 }
+
+const promises = [];
+for (let i = 0; i < 8000; i++) {
+  promises.push(readFiles(i));
+}
+
+const result = await Promise.all(promises);
+console.log("Multiple ReadFileSync test passed.\n");

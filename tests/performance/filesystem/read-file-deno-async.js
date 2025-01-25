@@ -1,10 +1,20 @@
-
-for (let i = 0; i < 100; i++) {
-    const content = await Deno.readTextFile('./local/examples/fs/data.txt');
-    console.log(content);
-
-    await Deno.writeTextFile(`./local/examples/fs/mocks/data-${i}.txt`, content)
-    console.log("Content written to file");
-
-    await Deno.remove(`./local/examples/fs/mocks/data-${i}.txt`);
+async function readFiles(i) {
+  const content = await Deno.readTextFile(
+    "/Users/kcaicedo/Documents/Projects/kedojs/local/examples/fs/data.txt",
+  );
+  await Deno.writeTextFile(
+    `/Users/kcaicedo/Documents/Projects/kedojs/local/examples/mocks/data-${i}.txt`,
+    content,
+  );
+  await Deno.remove(
+    `/Users/kcaicedo/Documents/Projects/kedojs/local/examples/mocks/data-${i}.txt`,
+  );
 }
+
+const promises = [];
+for (let i = 0; i < 8000; i++) {
+  promises.push(readFiles(i));
+}
+
+const result = await Promise.all(promises);
+console.log("Multiple ReadFileSync test passed.\n");

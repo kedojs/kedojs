@@ -1,0 +1,33 @@
+[package]
+name = "kedo_runtime"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+rust_jsc.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+hyper-tls.workspace = true
+async-compression.workspace = true
+http-body-util.workspace = true
+form_urlencoded.workspace = true
+encoding_rs.workspace = true
+url.workspace = true
+bytes.workspace = true
+futures.workspace = true
+base64.workspace = true
+percent-encoding.workspace = true
+thiserror.workspace = true
+tokio-rustls.workspace = true
+tokio-native-tls.workspace = true
+kedo_console.workspace = true
+kedo_utils.workspace = true
+kedo_timers.workspace = true
+kedo_core.workspace = true
+kedo_fs.workspace = true
+kedo_macros.workspace = true
+kedo_std.workspace = true

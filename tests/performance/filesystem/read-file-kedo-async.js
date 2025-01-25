@@ -1,11 +1,21 @@
-
-
-for (let i = 0; i < 100; i++) {
-    const content = await Kedo.readFile('./local/examples/fs/data.txt');
-    console.log(content);
-
-    await Kedo.writeFile(`./local/examples/fs/mocks/data-kedo-${i}.txt`, content)
-    console.log("Content written to file");
-
-    await Kedo.remove(`./local/examples/fs/mocks/data-kedo-${i}.txt`, false);
+async function readFiles(i) {
+  const content = await Kedo.readFile(
+    "/Users/kcaicedo/Documents/Projects/kedojs/local/examples/fs/data.txt",
+  );
+  await Kedo.writeFile(
+    `/Users/kcaicedo/Documents/Projects/kedojs/local/examples/mocks/data-kedo-${i}.txt`,
+    content,
+  );
+  await Kedo.remove(
+    `/Users/kcaicedo/Documents/Projects/kedojs/local/examples/mocks/data-kedo-${i}.txt`,
+    false,
+  );
 }
+
+const promises = [];
+for (let i = 0; i < 8000; i++) {
+  promises.push(readFiles(i));
+}
+
+const result = await Promise.all(promises);
+console.log("Multiple ReadFileSync test passed.\n");

@@ -7,8 +7,10 @@ local
 
 build/
 src/@std/dist/
-kedo-std/@std/dist/
+kedo_js/@std/dist/
+.build/
 
 tests/manual/*.txt
 .cargo/*
 .idea/
+log.txt

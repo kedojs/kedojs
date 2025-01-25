@@ -1,14 +1,13 @@
-import {
-  ReadableStreamResource,
-  op_read_sync_readable_stream,
-  op_write_sync_readable_stream,
-  op_read_readable_stream,
-  op_write_readable_stream,
-  op_close_readable_stream,
-  op_wait_close_readable_stream,
-} from "@kedo/internal/utils";
-import { ReadableStream } from "@kedo/stream";
 import assert from "@kedo/assert";
+import {
+  op_acquire_stream_reader,
+  op_close_stream_resource,
+  op_read_readable_stream,
+  op_read_sync_readable_stream,
+  op_write_readable_stream,
+  op_write_sync_readable_stream,
+  ReadableStreamResource
+} from "@kedo/internal/utils";
 
 // Helper function to compare two Uint8Arrays
 function arraysEqual(a, b) {
@@ -17,6 +16,18 @@ function arraysEqual(a, b) {
     if (a[i] !== b[i]) return false;
   }
   return true;
+}
+
+function asyncOp(fn, ...args) {
+  return new Promise((resolve, reject) => {
+    fn(...args, (err, result) => {
+      if (err) {
+        reject(err);
+      } else {
+        resolve(result);
+      }
+    });
+  });
 }
 
 async function testSyncReadWrite() {
@@ -28,11 +39,11 @@ async function testSyncReadWrite() {
   op_write_sync_readable_stream(resource, data);
 
   // Read data synchronously
-  const result = op_read_sync_readable_stream(resource);
+  let reader = op_acquire_stream_reader(resource);
+  const result = op_read_sync_readable_stream(reader);
   assert.ok(arraysEqual(result, data), `Expected ${data}, got ${result}`);
-
   // Attempt to read again, should return undefined (no more data)
-  const emptyResult = op_read_sync_readable_stream(resource);
+  const emptyResult = op_read_sync_readable_stream(reader);
   assert.ok(
     emptyResult === undefined,
     `Expected undefined, got ${emptyResult}`,
@@ -54,24 +65,25 @@ async function testAsyncReadWrite() {
 
   // Write chunks asynchronously
   for (const chunk of chunks) {
-    await op_write_readable_stream(resource, chunk);
+    await asyncOp(op_write_readable_stream, resource, chunk);
   }
 
+  let reader = op_acquire_stream_reader(resource);
   // Read chunks asynchronously and verify
   for (const expectedChunk of chunks) {
-    const result = await op_read_readable_stream(resource);
+    const result = await asyncOp(op_read_readable_stream, reader);
     assert.ok(
       arraysEqual(result, expectedChunk),
       `Expected ${expectedChunk}, got ${result}`,
     );
   }
 
-  // setTimeout(() => {
-  //   op_close_readable_stream(resource);
-  // }, 1000);
+  setTimeout(() => {
+    op_close_stream_resource(resource);
+  }, 1000);
   // let error = false;
   // Attempt to read again, should be pending or return undefined
-  const emptyResult = op_read_sync_readable_stream(resource);
+  const emptyResult = await asyncOp(op_read_readable_stream, reader);
   assert.ok(
     emptyResult === undefined,
     `Expected undefined after all data read, got ${emptyResult}`,
@@ -83,22 +95,22 @@ async function testAsyncReadWrite() {
 async function testCloseOperation() {
   console.log("Starting close operation test...");
   const resource = new ReadableStreamResource(102);
-
   // Write some data
   const data = new Uint8Array([42]);
-  await op_write_readable_stream(resource, data);
+  await asyncOp(op_write_readable_stream, resource, data);
 
+  let reader = op_acquire_stream_reader(resource);
   // Close the stream
-  op_close_readable_stream(resource);
-
+  op_close_stream_resource(resource);
+  // op_finalize_stream_resource(resource_id);
   // Attempt to read remaining data
-  const result = await op_read_readable_stream(resource);
+  const result = await asyncOp(op_read_readable_stream, reader);
   assert.ok(arraysEqual(result, data), `Expected ${data}, got ${result}`);
 
   console.log("Close First Read test passed.\n");
   // Subsequent reads should return undefined or error
   try {
-    const emptyResult = await op_read_readable_stream(resource);
+    const emptyResult = await asyncOp(op_read_readable_stream, reader);
     assert.ok(
       emptyResult === undefined,
       `Expected undefined after closing, got ${emptyResult}`,
@@ -108,16 +120,14 @@ async function testCloseOperation() {
   }
 
   // Attempt to write after closing should fail
+  let is_error = false;
   try {
-    await op_write_readable_stream(resource, new Uint8Array([1]));
-    // assert.fail("Expected error when writing to closed resource");
+    await asyncOp(op_write_readable_stream, resource, new Uint8Array([1]));
   } catch (e) {
-    assert.ok(
-      true,
-      `Correctly threw error when writing to closed resource: ${e}`,
-    );
+    is_error = true;
   }
 
+  assert.ok(is_error, `Correctly threw error when writing to closed resource`);
   console.log("Close operation test passed.\n");
 }
 
@@ -126,10 +136,11 @@ async function testEdgeCases() {
   const resource = new ReadableStreamResource(103);
 
   // Write an empty chunk
-  await op_write_readable_stream(resource, new Uint8Array([]));
+  await asyncOp(op_write_readable_stream, resource, new Uint8Array([]));
 
+  let reader = op_acquire_stream_reader(resource);
   // Read the empty chunk
-  const result = await op_read_readable_stream(resource);
+  const result = await asyncOp(op_read_readable_stream, reader);
   assert.ok(
     result.length === 0,
     `Expected empty Uint8Array, got length ${result.length}`,
@@ -139,8 +150,9 @@ async function testEdgeCases() {
   const emptyResource = new ReadableStreamResource(104);
   setTimeout(() => {
     op_write_sync_readable_stream(emptyResource, new Uint8Array([2]));
-  }, 1000);
-  const secondResult = await op_read_readable_stream(emptyResource);
+  }, 500);
+  const reader2 = op_acquire_stream_reader(emptyResource);
+  const secondResult = await asyncOp(op_read_readable_stream, reader2);
   assert.ok(
     secondResult[0] === 2,
     `Expected 2 when reading stream, got ${secondResult}`,
@@ -153,12 +165,13 @@ async function testConcurrentOperations() {
   console.log("Starting concurrent operations test...");
   const resource = new ReadableStreamResource(105);
 
+  const reader = op_acquire_stream_reader(resource);
   // Start a read operation (will wait for data)
-  const readPromise = op_read_readable_stream(resource);
+  const readPromise = asyncOp(op_read_readable_stream, reader);
 
   // Simulate delay and write data
   setTimeout(async () => {
-    await op_write_readable_stream(resource, new Uint8Array([99]));
+    await asyncOp(op_write_readable_stream, resource, new Uint8Array([99]));
   }, 100);
 
   // Verify that the readPromise resolves with the correct data
@@ -173,19 +186,8 @@ async function testErrorHandling() {
   const resource = new ReadableStreamResource(106);
 
   // Close the resource immediately
-  op_close_readable_stream(resource);
+  op_close_stream_resource(resource);
   let is_error = false;
-  // Attempt to read from closed resource
-  // try {
-  await op_read_readable_stream(resource);
-  // assert.fail("Expected error when reading from closed resource");
-  // } catch (e) {
-  //   assert.ok(
-  //     true,
-  //     `Correctly threw error when reading from closed resource: ${e}`,
-  //   );
-  // }
-
   // Attempt to write to closed resource
   try {
     const result = await op_write_readable_stream(
@@ -211,6 +213,7 @@ async function testHighWaterMark() {
   // Set the high water mark (maximum number of chunks in the queue) to a small value, e.g., 2 chunks
   const highWaterMark = 2;
   const resource = new ReadableStreamResource(highWaterMark);
+  const reader = op_acquire_stream_reader(resource);
 
   // Prepare data chunks
   const chunk1 = new Uint8Array([1]);
@@ -218,41 +221,41 @@ async function testHighWaterMark() {
   const chunk3 = new Uint8Array([3]); // This chunk will exceed the buffer capacity when written after chunk1 and chunk2
 
   // Write first chunk
-  await op_write_readable_stream(resource, chunk1);
+  await asyncOp(op_write_readable_stream, resource, chunk1);
   console.log("Wrote chunk1:", chunk1);
 
   // Write second chunk
-  await op_write_readable_stream(resource, chunk2);
+  await asyncOp(op_write_readable_stream, resource, chunk2);
   console.log("Wrote chunk2:", chunk2);
 
   setTimeout(() => {
     // Write third chunk
-    op_read_sync_readable_stream(resource, chunk3);
+    op_read_sync_readable_stream(reader, chunk3);
     console.log("Read chunk3: ", chunk3);
   }, 1000);
 
-  await op_write_readable_stream(resource, chunk3);
+  await asyncOp(op_write_readable_stream, resource, chunk3);
   console.log("Wrote chunk3:", chunk3);
 
   console.log("High water mark test passed.\n");
 }
 
-async function testWaitCloseReadableStream() {
-  console.log("Starting wait close test...");
-  const resource = new ReadableStreamResource(107);
+// async function testWaitCloseReadableStream() {
+//   console.log("Starting wait close test...");
+//   const resource = new ReadableStreamResource(107);
 
-  // Write some data
-  const data = new Uint8Array([42]);
-  await op_write_readable_stream(resource, data);
+//   // Write some data
+//   const data = new Uint8Array([42]);
+//   await op_write_readable_stream(resource, data);
 
-  // Close the stream
-  op_close_readable_stream(resource);
+//   // Close the stream
+//   op_close_stream_resource(resource);
 
-  // Wait for the stream to close
-  await op_wait_close_readable_stream(resource);
+//   // Wait for the stream to close
+//   await op_wait_close_readable_stream(resource);
 
-  console.log("Wait close test passed.\n");
-}
+//   console.log("Wait close test passed.\n");
+// }
 
 async function runAllTests() {
   try {

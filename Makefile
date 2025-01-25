@@ -8,7 +8,7 @@ bundle:
 	(cargo run --manifest-path ./cli/Cargo.toml -- bundle --output=$(output) --entry=$(entry) --minify)
 
 bundle-std:
-	(cargo run --manifest-path ./kedo-std/Cargo.toml -- bundle --output=src/@std/dist --minify)
+	(cargo run --manifest-path ./kedo_js/Cargo.toml -- bundle --output=build/@std/dist --minify)
 
 build:
 	(cargo build --manifest-path ./cli/Cargo.toml)

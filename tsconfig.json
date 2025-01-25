@@ -5,9 +5,13 @@
     "outDir": "dist",
     "strict": true,
     "declaration": true,
+    // "skipLibCheck": true,
+    "typeRoots": ["types"],
     "allowJs": true,
     "esModuleInterop": true
   },
-  "include": ["kedo-std/**/*.ts", "kedo-std/**/**/*.ts"],
-  "exclude": ["node_modules"]
+  "include": ["kedo_js/**/*.ts", "kedo_js/**/**/*.ts", "types/**/*.ts"],
+  "exclude": [
+    "node_modules",
+  ]
 }

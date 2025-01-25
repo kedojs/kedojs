@@ -1,8 +1,8 @@
 // use bundler::BundleArgs;
 use clap::{Parser, Subcommand};
-use kedo_core::runtime::Runtime;
+use kedo_runtime::runtime::Runtime;
 
-const STD_INDEX: &str = include_str!("../src/@std/dist/index.js");
+const STD_INDEX: &str = include_str!("../build/@std/dist/index.js");
 
 #[derive(Parser)]
 #[command(name = "Kedo")]
@@ -50,8 +50,20 @@ enum Commands {
     },
 }
 
-#[tokio::main]
-async fn main() {
+fn create_tokio_runtime() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_multi_thread()
+        // .worker_threads(4)
+        .enable_io()
+        .enable_time()
+        .event_interval(31)
+        .max_io_events_per_tick(1024)
+        .global_queue_interval(10)
+        .max_blocking_threads(4)
+        .build()
+        .unwrap()
+}
+
+fn main() {
     let cli = Cli::parse();
 
     match &cli.command {
@@ -64,6 +76,7 @@ async fn main() {
             // Load the standard library
             let result =
                 runtime.evaluate_module_from_source(STD_INDEX, "src/@std/index.js", None);
+            // let result = runtime.evaluate_module("./src/@std/dist/index.js");
             // match result {
             //     Ok(_) => {
             //         println!("Standard library loaded");
@@ -77,26 +90,32 @@ async fn main() {
             //     "Result Check: {:?}",
             //     runtime.check_syntax("console.log('Kevin')", None).unwrap()
             // );
-            let result = runtime.evaluate_module(file);
-            println!("Result: {:?}", "Complete");
-            match result {
-                Ok(_) => {
-                    runtime.idle().await;
-                    println!("Idle: {:?}", "Complete");
-                    // sleep(std::time::Duration::from_secs(5));
-                    // println!(
-                    //     "Result Check: {:?}",
-                    //     runtime.check_syntax("console.log('Kevin')", None).unwrap()
-                    // );
-                    // println!(
-                    //     "Result Check: {:?}",
-                    //     runtime.link_and_evaluate("4343").as_string().unwrap()
-                    // );
+            create_tokio_runtime().block_on(async {
+                let result = runtime.evaluate_module(file);
+                println!("Result: {:?}", "Complete");
+                match result {
+                    Ok(_) => {
+                        println!("Exact");
+                        // create_tokio_runtime().block_on(async {
+                        runtime.idle().await;
+                        // });
+                        // runtime.idle().await;
+                        println!("Idle: {:?}", "Complete");
+                        // sleep(std::time::Duration::from_secs(5));
+                        // println!(
+                        //     "Result Check: {:?}",
+                        //     runtime.check_syntax("console.log('Kevin')", None).unwrap()
+                        // );
+                        // println!(
+                        //     "Result Check: {:?}",
+                        //     runtime.link_and_evaluate("4343").as_string().unwrap()
+                        // );
+                    }
+                    Err(e) => {
+                        println!("Error CLI: {}", e.message().unwrap());
+                    }
                 }
-                Err(e) => {
-                    println!("Error CLI: {}", e.message().unwrap());
-                }
-            }
+            });
         }
         Some(Commands::Bundle {
             output,

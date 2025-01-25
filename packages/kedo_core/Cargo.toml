@@ -1,0 +1,17 @@
+[package]
+name = "kedo_core"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+repository.workspace = true
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+rust_jsc.workspace = true
+futures = { workspace = true, features = ["async-await"] }
+tokio = { workspace = true, features = ["time"] }
+kedo_utils.workspace = true
+kedo_std.workspace = true

@@ -122,7 +122,11 @@ impl Resolve for PathResolver {
     ) -> Result<Resolution, Error> {
         assert!(
             module_specifier.starts_with('.'),
-            "Module specifier should start with '.'"
+            "{}",
+            format!(
+                "Module specifier should start with '.': {}",
+                module_specifier.to_string()
+            )
         );
 
         let base = match base {
