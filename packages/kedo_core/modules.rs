@@ -1,11 +1,9 @@
-use std::collections::HashMap;
-
+use crate::state::downcast_state;
 use rust_jsc::{
     module_evaluate, module_fetch, module_import_meta, module_resolve, JSContext,
     JSModuleLoader, JSObject, JSStringRetain, JSValue,
 };
-
-use crate::state::downcast_state;
+use std::collections::HashMap;
 
 #[macro_export]
 macro_rules! define_exports {
@@ -38,44 +36,49 @@ macro_rules! define_exports {
     };
 }
 
-// ModuleLoader trait
+pub type ModuleImportMetaFn = Box<fn(name: &str) -> JSObject>;
+
+// Error handling
+#[derive(Debug)]
+pub enum ModuleError {
+    NotFound(String),
+    LoadError(String),
+    InvalidModule(String),
+    Other(String),
+}
+
+// Unified Module Source trait
 pub trait ModuleLoader {
-    fn load(&self, name: &str) -> String;
-    fn pattern(&self) -> &str;
+    /// Returns true if this source can handle the given module ID
+    fn can_handle(&self, module_id: &str) -> bool;
+    /// Resolves the module ID
+    /// This is used to resolve the module ID to a canonical form
+    fn resolve(&self, module_id: &str) -> Result<String, ModuleError>;
+    /// Resolves and loads the module content
+    /// This is used to resolve and load the module content
+    fn load(&self, module_id: &str) -> Result<String, ModuleError>;
 }
 
-// ModuleResolve trait
-pub trait ModuleResolve {
-    fn resolve(&self, name: &str) -> String;
-    fn pattern(&self) -> &str;
-}
-
-// ModuleEvaluate trait
-pub trait ModuleEvaluate {
-    fn evaluate(&self, ctx: &JSContext, name: &str) -> JSObject;
-}
-
-pub trait ModuleEvaluateDef: ModuleEvaluate {
+// Unified Module Evaluate trait
+pub trait ModuleSource {
+    /// Returns the value of the module
+    /// This is used to evaluate the module content
+    fn evaluate(&self, ctx: &JSContext, module_id: &str) -> JSObject;
+    /// Returns the value of the module
     fn name(&self) -> &str;
 }
 
-pub type ModuleImportMetaFn = Box<fn(name: &str) -> JSObject>;
-
 pub struct CoreModuleLoader {
-    resolvers: Vec<(String, Box<dyn ModuleResolve>)>,
-    loaders: Vec<(String, Box<dyn ModuleLoader>)>,
-
-    syn_modules: HashMap<String, Box<dyn ModuleEvaluateDef>>,
-
-    fs_resolver: Option<Box<dyn ModuleResolve>>,
+    loaders: Vec<Box<dyn ModuleLoader>>,
+    sources: HashMap<String, Box<dyn ModuleSource>>,
     fs_loader: Option<Box<dyn ModuleLoader>>,
     import_meta: Option<ModuleImportMetaFn>,
-    modue_loader: JSModuleLoader,
+    module_loader: JSModuleLoader,
 }
 
 impl CoreModuleLoader {
     pub fn default() -> Self {
-        let modue_loader = JSModuleLoader {
+        let module_loader = JSModuleLoader {
             disableBuiltinFileSystemLoader: false,
             moduleLoaderResolve: Some(Self::resolve),
             moduleLoaderEvaluate: Some(Self::evaluate_virtual),
@@ -85,18 +88,19 @@ impl CoreModuleLoader {
 
         Self {
             loaders: Vec::new(),
-            resolvers: Vec::new(),
-            syn_modules: HashMap::new(),
-
-            fs_resolver: None,
+            sources: HashMap::new(),
             fs_loader: None,
             import_meta: None,
-            modue_loader,
+            module_loader,
         }
     }
 
-    pub fn set_builtin_filesystem_loader(&mut self, enable: bool) {
-        self.modue_loader.disableBuiltinFileSystemLoader = !enable;
+    pub fn disable_builtin_fs_loader(&mut self) {
+        self.module_loader.disableBuiltinFileSystemLoader = true;
+    }
+
+    pub fn enable_builtin_fs_loader(&mut self) {
+        self.module_loader.disableBuiltinFileSystemLoader = false;
     }
 
     pub fn set_import_meta(&mut self, import_meta: ModuleImportMetaFn) {
@@ -105,37 +109,24 @@ impl CoreModuleLoader {
 
     pub fn set_file_system_loader(&mut self, loader: impl ModuleLoader + 'static) {
         self.fs_loader = Some(Box::new(loader));
-        self.modue_loader.disableBuiltinFileSystemLoader = true;
+        self.module_loader.disableBuiltinFileSystemLoader = true;
     }
 
     pub fn init(&self, ctx: &JSContext) {
         let synthenic_keys: Vec<JSStringRetain> =
-            self.syn_modules.keys().map(|k| k.as_str().into()).collect();
+            self.sources.keys().map(|k| k.as_str().into()).collect();
+
         ctx.set_virtual_module_keys(synthenic_keys.as_slice());
-
-        ctx.set_module_loader(self.modue_loader.clone());
+        ctx.set_module_loader(self.module_loader.clone());
     }
 
-    pub fn register_loader(&mut self, loader: impl ModuleLoader + 'static) {
-        self.loaders
-            .push((loader.pattern().to_string(), Box::new(loader)));
-        // sort in descending order
-        self.loaders.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+    pub fn add_loader(&mut self, loader: impl ModuleLoader + 'static) {
+        self.loaders.push(Box::new(loader));
     }
 
-    pub fn register_resolver(&mut self, resolver: impl ModuleResolve + 'static) {
-        self.resolvers
-            .push((resolver.pattern().to_string(), Box::new(resolver)));
-        // sort in descending order
-        self.resolvers.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
-    }
-
-    pub fn register_synthetic_module(
-        &mut self,
-        module: impl ModuleEvaluateDef + 'static,
-    ) {
-        self.syn_modules
-            .insert(module.name().to_string(), Box::new(module));
+    pub fn add_source(&mut self, source: impl ModuleSource + 'static) {
+        self.sources
+            .insert(source.name().to_string(), Box::new(source));
     }
 
     #[module_resolve]
@@ -146,37 +137,45 @@ impl CoreModuleLoader {
         _script_fetcher: JSValue,
     ) -> JSStringRetain {
         let state = downcast_state(&ctx);
-        let key = module_name.as_string().unwrap().to_string();
-        let loader = state.module_loader();
+        let module_loader = state.module_loader().borrow();
+        let module_id = module_name
+            .as_string()
+            .expect("Module name must be a string")
+            .to_string();
 
-        for (pattern, resolver) in loader.resolvers.iter() {
-            if key.starts_with(pattern) {
-                return resolver.resolve(&key).into();
+        if let Some(_) = module_loader.sources.get(&module_id) {
+            return module_id.into();
+        }
+
+        for loader in module_loader.loaders.iter() {
+            if loader.can_handle(&module_id) {
+                return loader.resolve(&module_id).unwrap().into();
             }
         }
 
-        if loader.modue_loader.disableBuiltinFileSystemLoader {
-            if let Some(fs_resolver) = &loader.fs_resolver {
-                return fs_resolver.resolve(&key).into();
+        if module_loader.module_loader.disableBuiltinFileSystemLoader {
+            if let Some(fs_loader) = &module_loader.fs_loader {
+                return fs_loader.resolve(&module_id).unwrap().into();
             }
         }
 
-        unreachable!("No module resolver found for: {:?}", key);
+        unreachable!("Invalid Module: {:?}", module_id);
     }
 
     #[module_evaluate]
     fn evaluate_virtual(ctx: JSContext, module_name: JSValue) -> JSValue {
         let binding = downcast_state(&ctx);
-        let key = module_name
+        let loader = binding.module_loader().borrow();
+        let module_id = module_name
             .as_string()
             .expect("Module name must be a string")
             .to_string();
 
-        if let Some(syn_module) = binding.module_loader().syn_modules.get(&key) {
-            return syn_module.evaluate(&ctx, &key).into();
+        if let Some(source) = loader.sources.get(&module_id) {
+            return source.evaluate(&ctx, &module_id).into();
         }
 
-        unreachable!("Module not found: {:?}", key);
+        unreachable!("Module: {:?} not found", module_id);
     }
 
     #[module_fetch]
@@ -187,22 +186,25 @@ impl CoreModuleLoader {
         _script_fetcher: JSValue,
     ) -> JSStringRetain {
         let binding = downcast_state(&ctx);
-        let key = module_name.as_string().unwrap().to_string();
-        let loader = binding.module_loader();
+        let loader = binding.module_loader().borrow();
+        let module_id = module_name
+            .as_string()
+            .expect("Module name must be a string")
+            .to_string();
 
-        for (pattern, loader) in loader.loaders.iter() {
-            if key.starts_with(pattern) {
-                return loader.load(&key).into();
+        for loader in loader.loaders.iter() {
+            if loader.can_handle(&module_id) {
+                return loader.load(&module_id).unwrap().into();
             }
         }
 
-        if loader.modue_loader.disableBuiltinFileSystemLoader {
+        if loader.module_loader.disableBuiltinFileSystemLoader {
             if let Some(fs_loader) = &loader.fs_loader {
-                return fs_loader.load(&key).into();
+                return fs_loader.load(&module_id).unwrap().into();
             }
         }
 
-        unreachable!("No module resolver found for: {:?}", key);
+        unreachable!("No module found for: {:?}", module_id);
     }
 
     #[module_import_meta]
@@ -212,7 +214,8 @@ impl CoreModuleLoader {
         _script_fetcher: JSValue,
     ) -> JSObject {
         let binding = downcast_state(&ctx);
-        if let Some(import_meta) = &binding.module_loader().import_meta {
+        let loader = binding.module_loader().borrow();
+        if let Some(import_meta) = &loader.import_meta {
             import_meta(&key.as_string().unwrap().to_string())
         } else {
             JSObject::new(&ctx)
@@ -226,6 +229,7 @@ mod tests {
     use std::{collections::HashSet, path::Path};
 
     use kedo_std::TimerQueue;
+    use rust_jsc::{JSContext, JSObject, JSValue};
 
     use crate::{
         class_table::ClassTable, job::AsyncJobQueue, proto_table::ProtoTable,
@@ -236,17 +240,20 @@ mod tests {
 
     pub struct KedoSyn;
 
-    impl ModuleEvaluate for KedoSyn {
+    impl ModuleSource for KedoSyn {
         fn evaluate(&self, ctx: &JSContext, name: &str) -> JSObject {
             let default = JSObject::new(ctx);
-            default
+            let exports = JSObject::new(ctx);
+            exports
                 .set_property("name", &JSValue::string(ctx, name), Default::default())
+                .unwrap();
+
+            default
+                .set_property("default", &exports, Default::default())
                 .unwrap();
             default
         }
-    }
 
-    impl ModuleEvaluateDef for KedoSyn {
         fn name(&self) -> &str {
             "@kedo/syn"
         }
@@ -256,17 +263,21 @@ mod tests {
         keys: HashSet<String>,
     }
 
-    impl ModuleResolve for KedoResolver {
-        fn resolve(&self, name: &str) -> String {
+    impl ModuleLoader for KedoResolver {
+        fn resolve(&self, name: &str) -> Result<String, ModuleError> {
             if self.keys.contains(name) {
-                return name.to_string();
+                return Ok(name.to_string());
             }
 
-            unreachable!("Module not found: {:?}", name);
+            Err(ModuleError::NotFound(name.to_string()))
         }
 
-        fn pattern(&self) -> &str {
-            "@kedo"
+        fn can_handle(&self, module_id: &str) -> bool {
+            self.keys.contains(module_id)
+        }
+
+        fn load(&self, _module_id: &str) -> Result<String, ModuleError> {
+            Ok("".to_string())
         }
     }
 
@@ -285,7 +296,7 @@ mod tests {
     #[test]
     fn test_synthetic_module() {
         let mut loader = CoreModuleLoader::default();
-        let module_test_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/rust/modules");
+        let module_test_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/modules");
         let module_path = format!("{}/01_module.js", module_test_dir);
 
         let syn_module = KedoSyn {};
@@ -293,8 +304,8 @@ mod tests {
             keys: vec!["@kedo/syn".to_string()].into_iter().collect(),
         };
 
-        loader.register_resolver(std_resolver);
-        loader.register_synthetic_module(syn_module);
+        loader.add_loader(std_resolver);
+        loader.add_source(syn_module);
 
         let ctx = JSContext::new();
         loader.init(&ctx);
@@ -325,14 +336,14 @@ mod tests {
     #[test]
     fn test_module_loader() {
         let mut loader = CoreModuleLoader::default();
-        let module_test_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/rust/modules");
+        let module_test_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/modules");
         let module_path = format!("{}/02_module.js", module_test_dir);
 
         struct KedoTestLoader;
 
         impl ModuleLoader for KedoTestLoader {
-            fn load(&self, _name: &str) -> String {
-                return r#"
+            fn load(&self, _name: &str) -> Result<String, ModuleError> {
+                return Ok(r#"
                     export const name = 'Kedo';
                     export const version = '0.1.0';
 
@@ -341,22 +352,26 @@ mod tests {
                         version,
                     };
                 "#
-                .to_string();
+                .to_string());
             }
 
-            fn pattern(&self) -> &str {
-                "@kedo:"
+            fn can_handle(&self, module_id: &str) -> bool {
+                module_id.starts_with("@kedo:")
+            }
+
+            fn resolve(&self, name: &str) -> Result<String, ModuleError> {
+                Ok(name.to_string())
             }
         }
 
         let kedo_loader = KedoTestLoader {};
-        loader.register_loader(kedo_loader);
+        loader.add_loader(kedo_loader);
 
         struct MockLoader;
 
         impl ModuleLoader for MockLoader {
-            fn load(&self, _name: &str) -> String {
-                return r#"
+            fn load(&self, _name: &str) -> Result<String, ModuleError> {
+                return Ok(r#"
                     export const name = 'Mock';
                     export const version = '1.0.0';
 
@@ -365,31 +380,20 @@ mod tests {
                         version,
                     };
                 "#
-                .to_string();
+                .to_string());
             }
 
-            fn pattern(&self) -> &str {
-                "@mock:"
+            fn can_handle(&self, module_id: &str) -> bool {
+                module_id.starts_with("@mock:")
+            }
+
+            fn resolve(&self, name: &str) -> Result<String, ModuleError> {
+                Ok(name.to_string())
             }
         }
 
         let mock_loader = MockLoader {};
-        loader.register_loader(mock_loader);
-
-        struct CommonResolver;
-
-        impl ModuleResolve for CommonResolver {
-            fn resolve(&self, name: &str) -> String {
-                return name.to_string();
-            }
-
-            fn pattern(&self) -> &str {
-                "@"
-            }
-        }
-
-        let common_resolver = CommonResolver {};
-        loader.register_resolver(common_resolver);
+        loader.add_loader(mock_loader);
 
         let ctx = JSContext::new();
         loader.init(&ctx);
@@ -437,46 +441,40 @@ mod tests {
     #[test]
     fn test_file_system_loader() {
         let mut loader = CoreModuleLoader::default();
-        let module_test_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/rust/modules");
+        let module_test_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/modules");
         let module_path = format!("{}/03_module.js", module_test_dir);
 
         struct FsLoader;
 
         impl ModuleLoader for FsLoader {
-            fn load(&self, name: &str) -> String {
-                let content = std::fs::read_to_string(name).expect("Failed to read file");
-                content
+            fn load(&self, name: &str) -> Result<String, ModuleError> {
+                let content = std::fs::read_to_string(name);
+                match content {
+                    Ok(content) => Ok(content),
+                    Err(_) => Err(ModuleError::LoadError(name.to_string())),
+                }
             }
 
-            fn pattern(&self) -> &str {
-                "file:"
+            fn can_handle(&self, module_id: &str) -> bool {
+                module_id.starts_with("file:")
+            }
+
+            fn resolve(&self, name: &str) -> Result<String, ModuleError> {
+                let module_test_dir =
+                    concat!(env!("CARGO_MANIFEST_DIR"), "/tests/rust/modules");
+                let path = Path::new(module_test_dir).join(name);
+                let path = std::fs::canonicalize(path)
+                    .map_err(|_| ModuleError::NotFound(name.to_string()))?
+                    .to_str()
+                    .ok_or(ModuleError::InvalidModule(name.to_string()))?
+                    .to_string();
+
+                Ok(path)
             }
         }
 
         let file_system_loader = FsLoader {};
-        loader.register_loader(file_system_loader);
-
-        struct FsResolver;
-
-        impl ModuleResolve for FsResolver {
-            fn resolve(&self, name: &str) -> String {
-                let module_test_dir =
-                    concat!(env!("CARGO_MANIFEST_DIR"), "/tests/rust/modules");
-                let path = Path::new(module_test_dir).join(name);
-                std::fs::canonicalize(path)
-                    .expect("Failed to resolve path")
-                    .to_str()
-                    .unwrap()
-                    .to_string()
-            }
-
-            fn pattern(&self) -> &str {
-                "file:"
-            }
-        }
-
-        let file_system_resolver = FsResolver {};
-        loader.register_resolver(file_system_resolver);
+        loader.add_loader(file_system_loader);
 
         let ctx = JSContext::new();
         loader.init(&ctx);

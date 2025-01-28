@@ -2,6 +2,8 @@
 use clap::{Parser, Subcommand};
 use kedo_runtime::runtime::Runtime;
 
+mod std_loader;
+
 const STD_INDEX: &str = include_str!("../build/@std/dist/index.js");
 
 #[derive(Parser)]
@@ -73,6 +75,7 @@ fn main() {
             }
 
             let mut runtime = Runtime::new();
+            runtime.add_loader(std_loader::StdModuleLoader::default());
             // Load the standard library
             let result =
                 runtime.evaluate_module_from_source(STD_INDEX, "src/@std/index.js", None);

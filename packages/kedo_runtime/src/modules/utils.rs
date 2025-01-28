@@ -1,8 +1,6 @@
 use std::time::Duration;
 
-use kedo_core::{
-    downcast_state, JsProctectedCallable, ModuleEvaluate, ModuleEvaluateDef,
-};
+use kedo_core::{downcast_state, JsProctectedCallable, ModuleSource};
 use kedo_fs::FileSystemModule;
 use rust_jsc::{
     callback, JSArrayBuffer, JSContext, JSFunction, JSObject, JSResult, JSValue,
@@ -85,7 +83,6 @@ pub fn util_exports(ctx: &JSContext) -> JSObject {
         .expect("Failed to export StreamResourceModule");
     FetchModule::export(ctx, &exports).expect("Failed to export FetchModule");
 
-    // fetch_exports(ctx, &exports);
     server_exports(ctx, &exports);
     signal_exports(ctx, &exports);
 
@@ -94,13 +91,11 @@ pub fn util_exports(ctx: &JSContext) -> JSObject {
 
 pub struct UtilsModule;
 
-impl ModuleEvaluate for UtilsModule {
+impl ModuleSource for UtilsModule {
     fn evaluate(&self, ctx: &JSContext, _name: &str) -> JSObject {
         util_exports(ctx)
     }
-}
 
-impl ModuleEvaluateDef for UtilsModule {
     fn name(&self) -> &str {
         "@kedo/internal/utils"
     }
@@ -112,7 +107,6 @@ mod tests {
     use super::*;
     use crate::modules::internal_utils_tests::setup_module_loader;
     use crate::tests::test_utils::new_runtime;
-    use kedo_core::ModuleResolve;
     use rust_jsc::JSContext;
 
     #[test]
@@ -121,19 +115,6 @@ mod tests {
         let module = UtilsModule;
         let exports = module.evaluate(&ctx, "@kedo/internal/utils");
         assert!(exports.has_property("is_array_buffer_detached"));
-    }
-
-    #[allow(dead_code)]
-    struct UtilsResolver;
-
-    impl ModuleResolve for UtilsResolver {
-        fn resolve(&self, name: &str) -> String {
-            name.to_string()
-        }
-
-        fn pattern(&self) -> &str {
-            "@kedo/internal/utils"
-        }
     }
 
     #[test]

@@ -1,0 +1,50 @@
+
+async function testServerListen() {
+    // Test 1: Passing URLSearchParams as the body
+    Deno.serve({
+        hostname: "localhost",
+        port: 8000,
+    },
+        (req) => {
+            let timer;
+            const body = new ReadableStream({
+                async start(controller) {
+                    // timer = setInterval(() => {
+                    controller.enqueue("Hello, World!\n");
+                    controller.close();
+                    // }, 1);
+                },
+                cancel() {
+                    clearInterval(timer);
+                },
+            });
+            return new Response(body.pipeThrough(new TextEncoderStream()), {
+                headers: {
+                    "content-type": "text/plain; charset=utf-8",
+                },
+            });
+        });
+    // Deno.serve(
+    //   {
+    //     onListen({ port, hostname }) {
+    //       console.log(`Server started at ${hostname}:${port}`);
+    //     },
+    //   },
+    //   (_req) => new Response("Hello, world"),
+    // );
+}
+
+// Execute tests
+async function runTests() {
+    console.log("Running tests...");
+    try {
+        await testServerListen();
+        console.log("testRequestArgs passed");
+
+        console.log("All tests passed");
+    } catch (err) {
+        console.error(err.message);
+    }
+}
+
+await runTests();

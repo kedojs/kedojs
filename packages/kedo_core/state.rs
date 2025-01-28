@@ -1,4 +1,4 @@
-use std::{cell::RefCell, sync::Arc};
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use kedo_std::TimerQueue;
 use kedo_utils::ManuallyDropClone;
@@ -17,7 +17,7 @@ macro_rules! enqueue_job {
 
 pub struct CoreState {
     job_queue: Arc<RefCell<AsyncJobQueue>>,
-    module_loader: Arc<CoreModuleLoader>,
+    module_loader: Rc<RefCell<CoreModuleLoader>>,
     timer_queue: Arc<TimerQueue<JsProctectedCallable>>,
     class_manager: Arc<ClassTable>,
     proto_manager: Arc<ProtoTable>,
@@ -45,7 +45,7 @@ impl CoreState {
     ) -> CoreState {
         CoreState {
             job_queue: Arc::new(RefCell::new(job_queue)),
-            module_loader: Arc::new(module_loader),
+            module_loader: Rc::new(RefCell::new(module_loader)),
             timer_queue: Arc::new(timer_queue),
             class_manager: Arc::new(manager),
             proto_manager: Arc::new(proto),
@@ -68,7 +68,7 @@ impl CoreState {
         &self.proto_manager
     }
 
-    pub fn module_loader(&self) -> &Arc<CoreModuleLoader> {
+    pub fn module_loader(&self) -> &Rc<RefCell<CoreModuleLoader>> {
         &self.module_loader
     }
 }

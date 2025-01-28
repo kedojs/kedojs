@@ -5,7 +5,6 @@ use crate::{
     },
     modules::{self, text_decoder_inner::EncodingTextDecoder, url_record::UrlRecord},
     signals::InternalSignal,
-    std_modules,
     streams::streams::{JSReadableStreamResource, JSReadableStreamResourceReader},
 };
 use futures::future::poll_fn;
@@ -80,6 +79,11 @@ impl Runtime {
         runtime
     }
 
+    pub fn add_loader(&self, loader: impl kedo_core::ModuleLoader + 'static) {
+        let mut module_loader = self.state.module_loader().borrow_mut();
+        module_loader.add_loader(loader);
+    }
+
     pub fn evaluate_module(&self, filename: &str) -> JSResult<()> {
         self.context.evaluate_module(filename)
     }
@@ -125,18 +129,16 @@ impl Runtime {
     }
 
     fn init_module_loaders(module_loader: &mut CoreModuleLoader) {
-        module_loader.register_loader(std_modules::StdModuleLoader);
-        module_loader.register_resolver(std_modules::StdModuleResolver);
-        module_loader.register_resolver(modules::InternalModuleResolver);
-        module_loader.register_synthetic_module(modules::utils::UtilsModule);
+        module_loader.add_source(modules::utils::UtilsModule);
     }
 
     fn init_module(&self) {
-        self.state.module_loader().init(&self.context);
+        self.state.module_loader().borrow().init(&self.context);
         Console::init_globals(&self.context).unwrap();
         Timer::init_globals(&self.context).unwrap();
         let kedo = JSObject::new(&self.context);
         kedo.protect();
+
         self.context
             .global_object()
             .set_property("Kedo", &kedo, Default::default())
@@ -144,7 +146,6 @@ impl Runtime {
     }
 
     fn init_class(class_manager: &mut ClassTable) {
-        // DirEntry::init(class_manager, &ctx, &global).expect("Failed to init DirEntry");
         UrlRecord::init_class(class_manager).expect("Failed to init UrlRecord");
         EncodingTextDecoder::init_class(class_manager)
             .expect("Failed to init EncodingTextDecoder");

@@ -39,6 +39,7 @@ impl ModuleManager {
         self.entries.push(entry);
     }
 
+    #[allow(dead_code)]
     pub fn remove_entry(&mut self, entry: &str) {
         self.entries.retain(|e| e != entry);
     }
@@ -47,6 +48,7 @@ impl ModuleManager {
         self.externals.push(module);
     }
 
+    #[allow(dead_code)]
     pub fn remove_external_module(&mut self, module: &str) {
         self.externals.retain(|m| m != module);
     }

@@ -13,10 +13,10 @@ pub use job::SimpleJobQueue;
 
 // modules
 pub use modules::CoreModuleLoader;
-pub use modules::ModuleEvaluate;
-pub use modules::ModuleEvaluateDef;
+pub use modules::ModuleError;
+pub use modules::ModuleImportMetaFn;
 pub use modules::ModuleLoader;
-pub use modules::ModuleResolve;
+pub use modules::ModuleSource;
 
 pub use callback::JsProctectedCallable;
 // state
