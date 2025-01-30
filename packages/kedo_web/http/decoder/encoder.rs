@@ -1,23 +1,19 @@
-use std::pin::Pin;
-
+use crate::http::body::InternalBodyStream;
+use crate::http::fetch::errors::FetchError;
+use crate::http::headers::HeadersMap;
 use async_compression::tokio::bufread::BrotliEncoder;
 use async_compression::tokio::bufread::GzipEncoder;
 use async_compression::tokio::bufread::ZlibEncoder;
 use async_compression::tokio::bufread::ZstdEncoder;
-
 use bytes::Bytes;
 use futures::ready;
 use futures::Stream;
-
 use hyper::body::Body;
 use hyper::body::SizeHint;
 use hyper::header::ACCEPT_ENCODING;
+use std::pin::Pin;
 use tokio_util::codec::{BytesCodec, FramedRead};
 use tokio_util::io::StreamReader;
-
-use super::body::InternalBodyStream;
-use super::headers::HeadersMap;
-use crate::http::fetch::errors::FetchError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EncoderType {
@@ -351,20 +347,20 @@ impl Body for StreamEncoder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::streams::streams::InternalStreamResource;
     use futures::StreamExt;
     use hyper::header::ACCEPT_ENCODING;
+    use kedo_std::BoundedBufferChannel;
 
     #[tokio::test]
     async fn test_stream_encoder_plain() {
-        let mut stream = InternalStreamResource::<Vec<u8>>::new(5);
+        let mut stream = BoundedBufferChannel::<Vec<u8>>::new(5);
         for i in b"hello".to_vec() {
-            stream.write(vec![i]).unwrap();
+            stream.try_write(vec![i]).unwrap();
         }
-        stream.close();
         let encoder = StreamEncoder::plain(InternalBodyStream::new(
-            stream.new_reader().take().unwrap(),
+            stream.aquire_reader().take().unwrap(),
         ));
+        stream.close();
 
         let mut chunks = Vec::new();
         let mut stream = encoder;
@@ -394,14 +390,14 @@ mod tests {
         let accept = ACCEPT_ENCODING.to_string();
         let headers = HeadersMap::new(vec![(accept.clone(), "gzip".to_string())]);
 
-        let mut stream = InternalStreamResource::<Vec<u8>>::new(5);
-        let b_stream = InternalBodyStream::new(stream.new_reader().unwrap());
+        let mut stream = BoundedBufferChannel::<Vec<u8>>::new(5);
+        let b_stream = InternalBodyStream::new(stream.aquire_reader().unwrap());
         let encoder = StreamEncoder::detect(b_stream, &headers);
         assert!(matches!(encoder.inner, Inner::Gzip(_)));
 
         let headers = HeadersMap::new(vec![(accept.clone(), "br, deflate".to_string())]);
-        let mut stream = InternalStreamResource::<Vec<u8>>::new(5);
-        let b_stream = InternalBodyStream::new(stream.new_reader().unwrap());
+        let mut stream = BoundedBufferChannel::<Vec<u8>>::new(5);
+        let b_stream = InternalBodyStream::new(stream.aquire_reader().unwrap());
         let encoder = StreamEncoder::detect(b_stream, &headers);
         assert!(matches!(encoder.inner, Inner::Brotli(_)));
 
@@ -409,21 +405,21 @@ mod tests {
             (accept.clone(), "gzip;q=0.8".to_string()),
             (accept.clone(), "zstd;q=1.0, deflate".to_string()),
         ]);
-        let mut stream = InternalStreamResource::<Vec<u8>>::new(5);
-        let b_stream = InternalBodyStream::new(stream.new_reader().unwrap());
+        let mut stream = BoundedBufferChannel::<Vec<u8>>::new(5);
+        let b_stream = InternalBodyStream::new(stream.aquire_reader().unwrap());
         let encoder = StreamEncoder::detect(b_stream, &headers);
         assert!(matches!(encoder.inner, Inner::Zstd(_)));
     }
 
     #[tokio::test]
     async fn test_stream_encoder_detect_multiple_encodings() {
-        let mut stream = InternalStreamResource::<Vec<u8>>::new(5);
+        let mut stream = BoundedBufferChannel::<Vec<u8>>::new(5);
         let headers = HeadersMap::new(vec![(
             ACCEPT_ENCODING.to_string(),
             "gzip;q=0.8, br;q=1.0, *;q=0.1".to_string(),
         )]);
 
-        let b_stream = InternalBodyStream::new(stream.new_reader().unwrap());
+        let b_stream = InternalBodyStream::new(stream.aquire_reader().unwrap());
         let encoder = StreamEncoder::detect(b_stream, &headers);
         assert!(encoder.encoding().is_some());
         assert_eq!(encoder.encoding().unwrap(), EncoderType::Brotli);

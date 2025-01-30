@@ -5,8 +5,8 @@
 
 import { IterableWeakSet } from "@kedo/ds";
 import { Event, EventTarget } from "@kedo/events";
-import { queue_internal_timeout } from "@kedo/internal/utils";
 import { assert } from "@kedo/utils";
+import { queue_internal_timeout } from "@kedo:op/web";
 
 
 const _abortReason = Symbol("[abortReason]");
@@ -172,6 +172,10 @@ const createDependentAbortSignal = (signals: AbortSignal[]): AbortSignal => {
   return resultSignal;
 };
 
+function newAbortSignal(): AbortSignal {
+  return new AbortSignal(_illegalConstructor);
+}
+
 // https://dom.spec.whatwg.org/#interface-abortcontroller
 // |----------------------------------------------------------|
 // |                      AbortController                     |
@@ -200,5 +204,5 @@ class AbortController {
   }
 }
 
-export { AbortController, AbortSignal, createDependentAbortSignal };
+export { AbortController, AbortSignal, createDependentAbortSignal, newAbortSignal };
 

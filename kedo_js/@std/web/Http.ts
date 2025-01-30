@@ -1,32 +1,27 @@
+import { asyncOp } from "@kedo/utils";
+import {
+  isInReadableState,
+  ReadableStream,
+  readableStreamResource
+} from "@kedo:int/std/stream";
 import {
   InternalSignal,
+  op_http_request_body,
+  op_http_request_headers,
+  op_http_request_keep_alive,
+  op_http_request_method,
+  op_http_request_redirect_count,
+  op_http_request_uri,
   op_internal_fetch,
   op_internal_start_server,
   op_new_fetch_client,
   op_read_decoded_stream,
   op_send_event_response,
-  op_send_signal,
-} from "@kedo/internal/utils";
-import {
-  isDisturbed,
-  isErrored,
-  isInReadableState,
-  ReadableStream,
-  readableStreamCloseByteController,
-  readableStreamEnqueue,
-  readableStreamResource,
-} from "@kedo:int/std/stream";
-// import {
-//   AbortSignal,
-//   createDependentAbortSignal,
-//   emptyHeader,
-//   fillHeadersMapFrom,
-//   headerInnerList,
-//   Headers,
-// } from "@kedo/web/internals";
-import { assert, asyncOp } from "@kedo/utils";
-import { AbortSignal, createDependentAbortSignal } from "./AbortSignal";
-import { emptyHeader, fillHeadersMapFrom, headerInnerList, Headers } from "./Headers";
+  op_send_signal
+} from "@kedo:op/web";
+import { AbortSignal, createDependentAbortSignal, newAbortSignal } from "./AbortSignal";
+import { extractBody, mixinBody } from "./Body";
+import { emptyHeader, fillHeadersMapFrom, headerInnerList, Headers, headersFromInnerList } from "./Headers";
 
 type RequestInfo = Request | string;
 
@@ -80,6 +75,8 @@ const _request = Symbol("[request]");
 const _response = Symbol("[response]");
 const _requestBody = Symbol("[requestBody]");
 const _responseBody = Symbol("[responseBody]");
+const _internalHeaders = Symbol("[internalHeaders]");
+const _illegalConstructor = Symbol("[illegalConstructor]");
 const _headers = Symbol("[headers]");
 const _signal = Symbol("[signal]");
 
@@ -99,6 +96,10 @@ const HTTP_METHODS = {
   post: "POST",
   put: "PUT",
 };
+
+function isExtractedBody(body: any): body is ExtractedBody {
+  return !(body instanceof Uint8Array);
+}
 
 // https://fetch.spec.whatwg.org/#request-class
 // |----------------------------------------------------------|
@@ -130,262 +131,13 @@ const createInnerRequest = (parsedURL: URL): InnerRequest => {
   };
 };
 
-interface ExtractedBody {
-  stream: ReadableStream;
-  source: any;
-  length: number | null;
-  type: string | null;
-}
-
-// type BodyInit =
-//   | Blob
-//   | BufferSource
-//   | FormData
-//   | URLSearchParams
-//   | ReadableStream
-//   | string;
-
-const isReadableStream = (object: any): object is ReadableStream =>
-  object instanceof ReadableStream;
-
-const unusable = (stream: ReadableStream | null) => {
-  if (stream === null) return false;
-  return isDisturbed(stream as any) || stream.locked;
-};
-
-class InternalBody {
-  private _body: ReadableStream | null;
-  private _bodyUsed: boolean;
-  private _headers: Headers;
-
-  constructor(body: ReadableStream | null, headers: Headers) {
-    this._body = body;
-    this._bodyUsed = false;
-    this._headers = headers;
-  }
-
-  get body(): ReadableStream | null {
-    return this._body;
-  }
-
-  get bodyUsed(): boolean {
-    return this._body !== null && isDisturbed(this._body as any);
-  }
-
-  // Consume Body:
-  // The Consume body function consist of converting the byte sequence into javascrip value
-  // - 1. Check wheter the body is unsable by checking if it is different from null and stream is no disturbed or locked
-  // - 2. If body is null, then return null
-  // - 3. Fully Read the body:
-  //     - 3.1. Start a parrallel bytes queue
-  //     - 3.2. let reader be the result of acquiring a reader from body's stream
-  //     - 3.3. read all the bytes from the reader and add them to the queue
-  // - 4. resolve the prmise with the result of converting the queue into a javascript value
-  private async consumeBody(): Promise<Uint8Array> {
-    if (this.bodyUsed) {
-      throw new TypeError("Body has already been consumed.");
-    }
-
-    if (this._body === null) {
-      return new Uint8Array();
-    }
-
-    // 1. If object is unusable, then return a promise rejected with a TypeError.
-    if (unusable(this._body)) {
-      throw new TypeError("Body is unusable");
-    }
-
-    const reader = this._body.getReader<ReadableStreamDefaultReader>();
-    const chunks: Uint8Array[] = [];
-    let done: boolean | undefined = false;
-
-    while (!done) {
-      // Allocate a new buffer (e.g., 1KB) for each read
-      // TODO: Use a more efficient way to read the stream
-      // const buffer = new Uint8Array(1024);
-      const { value, done: readerDone } = await reader.read();
-      if (value && value.byteLength > 0) {
-        chunks.push(value);
-      }
-      done = readerDone;
-    }
-
-    this._bodyUsed = true;
-
-    // Combine all chunks into a single Uint8Array
-    const totalLength = chunks.reduce(
-      (sum, chunk) => sum + chunk.byteLength,
-      0,
-    );
-    const result = new Uint8Array(totalLength);
-    let offset = 0;
-
-    for (const chunk of chunks) {
-      result.set(chunk, offset);
-      offset += chunk.byteLength;
-    }
-
-    return result;
-  }
-
-  async arrayBuffer(): Promise<ArrayBuffer> {
-    const bytes = await this.consumeBody();
-    return bytes.buffer.slice(
-      bytes.byteOffset,
-      bytes.byteOffset + bytes.byteLength,
-    ) as ArrayBuffer;
-  }
-
-  async bytes(): Promise<Uint8Array> {
-    return this.consumeBody();
-  }
-
-  async json(): Promise<any> {
-    const text = await this.text();
-    try {
-      return JSON.parse(text);
-    } catch (e) {
-      throw new SyntaxError("Failed to parse JSON.");
-    }
-  }
-
-  async text(): Promise<string> {
-    const bytes = await this.consumeBody();
-    return new TextDecoder("utf-8").decode(bytes);
-  }
-
-  getMimeType(): string | null {
-    const contentType = this._headers.get("content-type");
-    return contentType;
-  }
-}
-
-// TODO: this implementation must be optimized
-function extractBody(
-  object: BodyInit,
-  keepalive = false,
-): { body: ExtractedBody; type: string | null } {
-  // Let stream be null.
-  let stream: ReadableStream | null = null;
-  let source: Uint8Array | null = null;
-  let length: number | null = null;
-  let type: string | null = null;
-
-  if (isReadableStream(object)) {
-    if (keepalive) {
-      throw new TypeError(
-        "ReadableStream cannot be used with keepalive set to true.",
-      );
-    }
-
-    if (isDisturbed(object as any) || object.locked) {
-      throw new TypeError("ReadableStream is unusable.");
-    }
-
-    stream = object;
-  } else {
-    stream = new ReadableStream({ type: "bytes" });
-  }
-
-  assert(stream instanceof ReadableStream);
-
-  if (object instanceof ArrayBuffer || ArrayBuffer.isView(object)) {
-    // Byte sequence or BufferSource
-    if (object instanceof ArrayBuffer) {
-      source = new Uint8Array(object).slice();
-    } else {
-      source = new Uint8Array(
-        object.buffer,
-        object.byteOffset,
-        object.byteLength,
-      ).slice();
-    }
-  } else if (object instanceof URLSearchParams) {
-    // URLSearchParams
-    source = new TextEncoder().encode(object.toString());
-    type = "application/x-www-form-urlencoded;charset=UTF-8";
-  } else if (typeof object === "string") {
-    // Scalar value string
-    source = new TextEncoder().encode(object);
-    type = "text/plain;charset=UTF-8";
-  } else if (!isReadableStream(object)) {
-    throw new TypeError("Invalid body type");
-  }
-
-  if (ArrayBuffer.isView(source)) {
-    length = source.byteLength;
-    if (!isErrored(stream as any)) {
-      readableStreamEnqueue(stream as any, source);
-      readableStreamCloseByteController(stream as any);
-    }
-  }
-
-  const body: ExtractedBody = { stream, source, length, type };
-  return { body, type };
-}
-
-type MixingInput = Request | Response;
-
-const mixinBody = (input: MixingInput, _bodyKey: keyof MixingInput) => {
-  const body = input[_bodyKey] as any as ExtractedBody | null;
-  const innerBody = new InternalBody(body?.stream || null, input[_headers]);
-
-  const mixin = {
-    body: {
-      get(): ReadableStream | null {
-        return innerBody.body;
-      },
-      configurable: true,
-      enumerable: true,
-    },
-    bodyUsed: {
-      get(): boolean {
-        return innerBody.bodyUsed;
-      },
-    },
-    arrayBuffer: {
-      value: function arrayBuffer(): Promise<ArrayBuffer> {
-        return innerBody.arrayBuffer();
-      },
-      writable: true,
-      configurable: true,
-      enumerable: true,
-    },
-    bytes: {
-      value: function bytes(): Promise<Uint8Array> {
-        return innerBody.bytes();
-      },
-      writable: true,
-      configurable: true,
-      enumerable: true,
-    },
-    json: {
-      value: function json(): Promise<any> {
-        return innerBody.json();
-      },
-      writable: true,
-      configurable: true,
-      enumerable: true,
-    },
-    text: {
-      value: function text(): Promise<string> {
-        return innerBody.text();
-      },
-      writable: true,
-      configurable: true,
-      enumerable: true,
-    },
-  };
-
-  Object.defineProperties(input, mixin);
-};
-
 class Request {
-  [_request]: InnerRequest;
-  [_headers]: Headers;
-  [_signal]: AbortSignal;
+  [_request]!: InnerRequest;
+  [_headers]?: Headers;
+  [_signal]!: AbortSignal;
 
   constructor(input: RequestInfo, init?: RequestInit) {
+    if ((input as any) === _illegalConstructor) return;
     // 1. Let request be null.
     let request: InnerRequest | null = null;
     // 2. Let fallbackMode be null.
@@ -468,13 +220,15 @@ class Request {
     }
 
     if (init?.signal) {
-      signal = init.signal as any as AbortSignal;
+      signal = init.signal as AbortSignal;
     }
 
     request.priority = init?.priority ?? request.priority;
     this[_request] = request;
     if (signal) {
       this[_signal] = createDependentAbortSignal([signal]);
+    } else {
+      this[_signal] = newAbortSignal();
     }
 
     this[_headers] = new Headers(request.header_list);
@@ -548,8 +302,16 @@ class Request {
     return this[_request].url.toString();
   }
 
-  get headers(): Headers {
+  get [_internalHeaders](): Headers {
+    if (this[_headers] === undefined) {
+      this[_headers] = headersFromInnerList(this[_request].header_list);
+    }
+
     return this[_headers];
+  }
+
+  get headers(): Headers {
+    return this[_internalHeaders];
   }
 
   get destination(): RequestDestination {
@@ -719,7 +481,6 @@ const initializeResponse = (
   }
 };
 
-const _illegalConstructor = Symbol("[illegalConstructor]");
 
 const createResponse = (
   response: InnerResponse,
@@ -985,13 +746,12 @@ async function performFetch(
     signal: internalSignal,
     redirect: REDIRECT_MAP[request.redirect],
   };
-  // let stream: ReadableStreamResource | undefined;
-  if (request.body && (request.body as ExtractedBody).stream) {
-    fetchRequest.stream = readableStreamResource(
-      (request.body as ExtractedBody).stream,
-    );
-  } else if (request.body && (request.body as ExtractedBody).source) {
-    fetchRequest.source = (request.body as ExtractedBody).source;
+  if (isExtractedBody(request.body)) {
+    if (request.body.source !== null) {
+      fetchRequest.source = request.body.source;
+    } else if (request.body.stream !== null) {
+      fetchRequest.stream = readableStreamResource(request.body.stream);
+    }
   }
 
   const fetchResponse = await asyncOp(op_internal_fetch, client, fetchRequest);
@@ -1034,7 +794,6 @@ function decodedStreamToReadableStream(
     type: "bytes",
     async pull(controller) {
       const chunk = await asyncOp(op_read_decoded_stream, responseStream);
-      // console.log("decodedStreamToReadableStream Chunk: ", chunk);
       if (chunk) {
         controller.enqueue(chunk);
       } else {
@@ -1055,13 +814,16 @@ type ServeOptions = {
   handler?: ServerHandler;
 };
 
-type TlsCertificate = {
-  keyFormat: "pem" | "der";
-  key: string;
-  cert: string;
-};
-
 type ServerHandler = (request: Request) => Promise<Response>;
+
+function internalServerError(): HttpResponse {
+  return {
+    status: 500,
+    url: "/",
+    status_message: "Internal Server Error",
+    headers: [],
+  };
+}
 
 function serve(
   options: ServeOptions | ServerHandler | (ServeOptions & TlsCertificate),
@@ -1100,7 +862,7 @@ function serve(
     port: serverOptions?.port || 8080,
     key: tlsCertificate?.key,
     cert: tlsCertificate?.cert,
-    handler: internalServerHandler(handler),
+    handler: serverHandler(handler),
     signal: internalSignal,
   };
 
@@ -1119,66 +881,155 @@ function serve(
     });
 }
 
-function internalServerHandler(handler: ServerHandler): InternalServerHandler {
-  return async (request: HttpRequest, sender: RequestEventResource) => {
-    // from http request to fetch request
+function serverHandler(handler: ServerHandler): InternalServerHandler {
+  const asyncHandler = async (request: Request) => {
+    const response = await handler(request);
+    return response;
+  };
+
+  const internalHandler = (request: HttpRequestResource, sender: RequestEventResource) => {
     const requestObject = _requestFromHttpRequest(request);
-    const responseObject = await handler(requestObject);
+    asyncHandler(requestObject)
+      .then((response) => {
+        let headersList: [string, string][] = [];
+        if (response.headers instanceof Headers) {
+          headersList = Array.from(response.headers.entries());
+        }
 
-    let headersList: [string, string][];
-    if (responseObject.headers instanceof Headers) {
-      // TODO: Check typings for Headers.entries()
-      headersList = Array.from(responseObject.headers.entries() as any) as [string, string][];
-    } else {
-      headersList = responseObject.headers;
+        let innerResponse = response[_response] as InnerResponse;
+        let responseBody: any = undefined;
+        if (isExtractedBody(innerResponse.body)) {
+          if (innerResponse.body.source) {
+            responseBody = { source: innerResponse.body.source };
+          } else if (innerResponse.body.stream) {
+            responseBody = { stream: readableStreamResource(innerResponse.body.stream) };
+          }
+        }
+
+        const httpResponse: HttpResponse = {
+          url: requestObject.url,
+          status: innerResponse.status,
+          status_message: innerResponse.statusMessage,
+          headers: headersList,
+          ...responseBody,
+        };
+
+        op_send_event_response(sender, httpResponse);
+      })
+      .catch((error) => {
+        console.log("Error: ", error.message);
+        op_send_event_response(sender, internalServerError());
+      });
+  }
+
+  return internalHandler;
+}
+
+class InnerRequestResource {
+  #method?: string;
+  #url?: string;
+  #headerList?: [string, string][];
+  #keepalive?: boolean;
+  #redirectCount?: number;
+  #body?: Uint8Array | ExtractedBody | null;
+  private requestResource: HttpRequestResource;
+
+  constructor(innerRequest: HttpRequestResource) {
+    this.requestResource = innerRequest;
+  }
+
+  get method() {
+    if (!this.#method) {
+      this.#method = op_http_request_method(this.requestResource);
     }
 
-    let innerResponse = responseObject[_response];
-    let responseBody: any = undefined;
-    if (innerResponse.body && (innerResponse.body as ExtractedBody).source) {
-      responseBody = {
-        source: (innerResponse.body as ExtractedBody).source,
-      };
-    } else if (
-      innerResponse.body &&
-      (innerResponse.body as ExtractedBody).stream
-    ) {
-      responseBody = {
-        stream: readableStreamResource(
-          (innerResponse.body as ExtractedBody).stream,
-        ),
-      };
+    return this.#method;
+  }
+
+  get url() {
+    if (!this.#url) {
+      this.#url = op_http_request_uri(this.requestResource);
     }
 
-    const httpResponse: HttpResponse = {
-      url: requestObject.url,
-      status: responseObject.status,
-      status_message: responseObject.statusText,
-      headers: headersList,
-      ...responseBody,
-    };
+    return this.#url;
+  }
 
-    op_send_event_response(sender, httpResponse);
+  get headerList() {
+    // return [];
+    if (!this.#headerList) {
+      this.#headerList = op_http_request_headers(this.requestResource);
+    }
+
+    return this.#headerList;
+  }
+
+  get keepalive() {
+    if (this.#keepalive === undefined) {
+      this.#keepalive = op_http_request_keep_alive(this.requestResource);
+    }
+
+    return this.#keepalive;
+  }
+
+  get redirectCount() {
+    if (this.#redirectCount === undefined) {
+      this.#redirectCount = op_http_request_redirect_count(this.requestResource);
+    }
+
+    return this.#redirectCount;
+  }
+
+  get body(): Uint8Array | ExtractedBody | null {
+    if (this.#body === undefined) {
+      const requestBody = op_http_request_body(this.requestResource);
+      if (requestBody?.source) {
+        this.#body = requestBody.source;
+      } else if (requestBody?.stream) {
+        const stream = decodedStreamToReadableStream(requestBody.stream);
+        const bodyWithType = extractBody(stream, this.keepalive);
+        this.#body = bodyWithType.body;
+      } else {
+        this.#body = null;
+      }
+    }
+
+    return this.#body as Uint8Array | ExtractedBody | null;
+  }
+}
+
+// create internal inner request
+const createInnerRequestFromResource = (innerRequest: HttpRequestResource): InnerRequest => {
+  const request = new InnerRequestResource(innerRequest);
+  return {
+    get method() { return request.method },
+    get url() { return new URL(request.url) },
+    get header_list() { return request.headerList },
+    get keepalive() { return request.keepalive },
+    get redirectCount() { return request.redirectCount },
+    get body() { return request.body },
+    unsafeRequestFlag: false,
+    get urlList() { return [this.url] },
+    get currentURL() { return this.url },
+    initiatorType: "fetch",
+    mode: "cors",
+    credentials: "same-origin",
+    cache: "default",
+    redirect: "follow",
+    referrer: "client",
+    origin: "client",
+    responseTainting: "basic",
+    referrerPolicy: "",
+    integrity: "",
+    priority: "auto"
   };
 }
 
-function _requestFromHttpRequest(httpRequest: HttpRequest): Request {
-  const url = httpRequest.url;
-  let bodyInit: BodyInit | null | undefined = undefined;
-  if (httpRequest.source) {
-    bodyInit = httpRequest.source;
-  } else if (httpRequest.stream) {
-    bodyInit = decodedStreamToReadableStream(httpRequest.stream);
-  }
-
-  const requestInit: RequestInit = {
-    method: httpRequest.method,
-    headers: httpRequest.header_list,
-    redirect: "manual",
-    body: bodyInit as any,
-  };
-
-  return new Request(url, requestInit);
+function _requestFromHttpRequest(httpRequest: HttpRequestResource): Request {
+  const innerRequest = createInnerRequestFromResource(httpRequest);
+  const request = new Request(_illegalConstructor as any);
+  request[_request] = innerRequest;
+  mixinBody(request, _requestBody as any);
+  return request;
 }
 
 export { fetch, Request, Response, serve };

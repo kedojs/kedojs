@@ -14,3 +14,4 @@ tests/manual/*.txt
 .cargo/*
 .idea/
 log.txt
+logs.txt

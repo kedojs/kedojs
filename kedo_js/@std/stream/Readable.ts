@@ -1,11 +1,5 @@
 import { Queue } from "@kedo/ds";
 import {
-  is_array_buffer_detached,
-  op_close_stream_resource,
-  op_write_readable_stream,
-  ReadableStreamResource
-} from "@kedo/internal/utils";
-import {
   assert,
   AsyncIteratorPrototype,
   asyncOp,
@@ -16,6 +10,12 @@ import {
   isPrototypeOf,
   isTypedArray,
 } from "@kedo/utils";
+import {
+  is_array_buffer_detached,
+  op_close_stream_resource,
+  op_write_readable_stream,
+  ReadableStreamResource
+} from "@kedo:op/web";
 
 interface ReadableStreamGenericReader {
   [_closedPromise]: Deferred;
@@ -198,7 +198,9 @@ function readIntoResourceFromReadableStream(
   // 2. Let readRequest be a new read request with the following items:
   const readRequest = {
     chunkSteps: (chunk: Uint8Array) => {
-      writeIntoResourceFromReadableStream(resource, reader, chunk);
+      writeIntoResourceFromReadableStream(resource, reader, chunk)
+        .then(() => { })
+        .catch(() => { });
     },
     closeSteps: () => {
       op_close_stream_resource(resource);

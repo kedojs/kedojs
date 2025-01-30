@@ -41,7 +41,8 @@ fn main() {
     let mut manager = ModuleManager::new(std_path);
     manager.scan().expect("Failed to scan modules");
 
-    manager.add_external_module("@kedo/internal/utils".to_string());
+    manager.add_external_module("@kedo:op/web".to_string());
+    manager.add_external_module("@kedo:op/fs".to_string());
     manager.add_entry("index.ts".to_string());
 
     let entries = manager.get_entries().clone();

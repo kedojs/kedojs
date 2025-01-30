@@ -10,33 +10,35 @@ type HttpResponse = {
     readonly url: string;
 };
 
-
 type HttpRequest = {
-    stream?: import("@kedo/internal/utils").ReadableStreamResource;
-    source?: Uint8Array;
-    signal?: import("@kedo/internal/utils").InternalSignal;
+    stream?: import("@kedo:op/web").ReadableStreamResource;
+    source?: Uint8Array | null;
+    signal?: import("@kedo:op/web").InternalSignal;
     redirect?: number;
     readonly header_list: [string, string][];
     readonly method: string;
     readonly url: string;
 };
 
+declare class HttpRequestResource {
+    constructor();
+}
+
 type InternalServerHandler = (
-    request: HttpRequest,
+    request: HttpRequestResource,
     sender: RequestEventResource,
-) => Promise<void>;
+) => void;
 
 type InternalServerOptions = {
     hostname: string;
     port: number;
     key?: string;
     cert?: string;
-    signal?: import("@kedo/internal/utils").InternalSignal;
+    signal?: import("@kedo:op/web").InternalSignal;
     handler: InternalServerHandler;
 };
 
-declare module "@kedo/internal/utils" {
-    import { DirEntry } from "@kedo/fs";
+declare module "@kedo:op/web" {
 
     class FetchClient {
         constructor();
@@ -130,6 +132,19 @@ declare module "@kedo/internal/utils" {
     export class ReadableStreamResource {
         constructor(hwm: number);
     }
+
+    // http request resource
+    export function op_http_request_method(_: HttpRequestResource): string;
+    export function op_http_request_uri(_: HttpRequestResource): string;
+    export function op_http_request_headers(_: HttpRequestResource): [string, string][];
+    export function op_http_request_keep_alive(_: HttpRequestResource): boolean;
+    export function op_http_request_redirect(_: HttpRequestResource): number;
+    export function op_http_request_redirect_count(_: HttpRequestResource): number;
+    export function op_http_request_body(_: HttpRequestResource): { stream?: ReadableStreamResource; source?: Uint8Array } | null;
+}
+
+declare module "@kedo:op/fs" {
+    import { DirEntry } from "@kedo/fs";
 
     export function op_fs_read_file_sync(path: string): string;
     export function op_fs_read_dir_sync(path: string): DirEntry[];

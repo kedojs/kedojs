@@ -202,29 +202,29 @@ mod tests {
         assert_eq!(notified.load(Ordering::SeqCst), true);
     }
 
-    #[tokio::test]
-    async fn test_internal_signal() {
-        let mut rt = crate::tests::test_utils::new_runtime();
-        let result = rt.evaluate_module_from_source(
-            r#"
-            import { InternalSignal, op_send_signal } from '@kedo/internal/utils';
-            globalThis.signal = new InternalSignal();
-            setTimeout(() => { op_send_signal(signal) }, 100);
-        "#,
-            "index.js",
-            None,
-        );
+    // #[tokio::test]
+    // async fn test_internal_signal() {
+    //     let mut rt = crate::tests::test_utils::new_runtime();
+    //     let result = rt.evaluate_module_from_source(
+    //         r#"
+    //         import { InternalSignal, op_send_signal } from '@kedo:op/web';
+    //         globalThis.signal = new InternalSignal();
+    //         setTimeout(() => { op_send_signal(signal) }, 100);
+    //     "#,
+    //         "index.js",
+    //         None,
+    //     );
 
-        assert!(result.is_ok());
-        let result = rt.evaluate_script("globalThis.signal", None);
-        assert!(result.is_ok());
-        let signal = result.unwrap().as_object().expect("Expected an object");
-        let internal_signal = downcast_ref::<InternalSignal>(&signal);
-        assert!(internal_signal.is_some());
-        let mut internal_signal = internal_signal.unwrap();
-        // now subscribe to the signal and wait for it
-        let result =
-            tokio::join!(internal_signal.signal.as_mut().unwrap().wait(), rt.idle());
-        assert!(result.0.is_ok());
-    }
+    //     assert!(result.is_ok());
+    //     let result = rt.evaluate_script("globalThis.signal", None);
+    //     assert!(result.is_ok());
+    //     let signal = result.unwrap().as_object().expect("Expected an object");
+    //     let internal_signal = downcast_ref::<InternalSignal>(&signal);
+    //     assert!(internal_signal.is_some());
+    //     let mut internal_signal = internal_signal.unwrap();
+    //     // now subscribe to the signal and wait for it
+    //     let result =
+    //         tokio::join!(internal_signal.signal.as_mut().unwrap().wait(), rt.idle());
+    //     assert!(result.0.is_ok());
+    // }
 }

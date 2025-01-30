@@ -1,19 +1,23 @@
 import { ReadableStream } from "@kedo/stream";
 
+const encoder = new TextEncoder();
+
 async function testServerListen() {
   // Test 1: Passing URLSearchParams as the body
   Kedo.serve(
     (_req) => {
       // return new Response("Hello, world");
       // stream
+      // const body = "Hello, World!\n";
       const body = new ReadableStream({
         type: "bytes",
         start(controller) {
-          // let hello_word_bytes = ;
-          // timer = setInterval(() => {
-          controller.enqueue(new TextEncoder().encode("Hello, World!\n"));
+          controller.enqueue(encoder.encode("Hello, World! 1\n"));
+          controller.enqueue(encoder.encode("Hello, World! 2\n"));
+        },
+        async pull(controller) {
+          controller.enqueue(encoder.encode("Hello, World! 4\n"));
           controller.close();
-          // }, 1);
         },
         cancel() { },
       });
@@ -21,6 +25,7 @@ async function testServerListen() {
       return new Response(body, {
         headers: {
           "content-type": "text/plain; charset=utf-8",
+          "server": "kedo/1.0",
         },
       });
     },

@@ -271,13 +271,13 @@ class Headers {
         return this;
       },
       [Symbol.toStringTag]: "HeadersIterator",
-      next: () => {
+      next: (): IteratorResult<string | [string, string] | undefined> => {
         let header: [string, string];
         if (index >= this[_headerList].length) {
           if (this[_setCookieValues].length > 0 && !cookiesVisited) {
             header = ["set-cookie", this[_setCookieValues].join(", ")];
             cookiesVisited = true;
-          } else return { done: true };
+          } else return { value: undefined, done: true };
         } else header = this[_headerList][index++];
 
         if (propertyNameKind === "KeyAndValue") {
@@ -287,6 +287,8 @@ class Headers {
         } else if (propertyNameKind === "Value") {
           return { value: header[1], done: false };
         }
+
+        throw new TypeError("Invalid PropertyNameKind");
       },
     };
   }
@@ -299,16 +301,16 @@ class Headers {
     return [...this[_setCookieValues]];
   }
 
-  entries() {
-    return this[_headersIterator]();
+  entries(): IterableIterator<[string, string]> {
+    return this[_headersIterator]() as IterableIterator<[string, string]>;
   }
 
-  keys() {
-    return this[_headersIterator]("Key");
+  keys(): IterableIterator<string> {
+    return this[_headersIterator]("Key") as IterableIterator<string>;
   }
 
-  values() {
-    return this[_headersIterator]("Value");
+  values(): IterableIterator<string> {
+    return this[_headersIterator]("Value") as IterableIterator<string>;
   }
 }
 
@@ -321,4 +323,11 @@ const headerInnerList = (headersMap: Headers) => {
   return headersMap[_headerList];
 }
 
-export { emptyHeader, fillHeadersMapFrom, headerInnerList, Headers };
+const headersFromInnerList = (innerList: [string, string][]) => {
+  const headers = new Headers(null as any);
+  headers[_headerList] = innerList;
+  headers[_headersGuard] = "none";
+  return headers;
+}
+
+export { emptyHeader, fillHeadersMapFrom, headerInnerList, Headers, headersFromInnerList };

@@ -1,20 +1,25 @@
-use crate::{
-    http::{
-        fetch::lib::FetchClientResource, lib::DecodedStreamResource,
-        server::lib::RequestEventResource,
-    },
-    modules::{self, text_decoder_inner::EncodingTextDecoder, url_record::UrlRecord},
-    signals::InternalSignal,
-    streams::streams::{JSReadableStreamResource, JSReadableStreamResourceReader},
-};
+// use crate::{
+//     http::{
+//         fetch::lib::FetchClientResource, lib::DecodedStreamResource,
+//         server::lib::RequestEventResource,
+//     },
+//     modules::{self, text_decoder_inner::EncodingTextDecoder, url_record::UrlRecord},
+//     signals::InternalSignal,
+// };
 use futures::future::poll_fn;
 use kedo_console::Console;
 use kedo_core::{
     AsyncJobQueue, ClassTable, CoreModuleLoader, CoreState, JobQueue, ProtoTable,
 };
+use kedo_fs::FileSystemModuleLoader;
 use kedo_std::TimerQueue;
 use kedo_timers::Timer;
 use kedo_utils::JSGlobalObject;
+use kedo_web::{
+    DecodedStreamResource, EncodingTextDecoder, FetchClientResource,
+    FetchRequestResource, InternalSignal, ReadableStreamResource,
+    ReadableStreamResourceReader, RequestEventResource, UrlRecord, WebModule,
+};
 use rust_jsc::{
     callback, uncaught_exception, uncaught_exception_event_loop, JSContext, JSError,
     JSFunction, JSObject, JSResult, JSString, JSValue,
@@ -129,7 +134,8 @@ impl Runtime {
     }
 
     fn init_module_loaders(module_loader: &mut CoreModuleLoader) {
-        module_loader.add_source(modules::utils::UtilsModule);
+        module_loader.add_source(WebModule);
+        module_loader.add_source(FileSystemModuleLoader);
     }
 
     fn init_module(&self) {
@@ -149,12 +155,14 @@ impl Runtime {
         UrlRecord::init_class(class_manager).expect("Failed to init UrlRecord");
         EncodingTextDecoder::init_class(class_manager)
             .expect("Failed to init EncodingTextDecoder");
-        JSReadableStreamResourceReader::init_class(class_manager)
+        ReadableStreamResourceReader::init_class(class_manager)
             .expect("Failed to init ReadableStreamResourceReader");
         FetchClientResource::init_class(class_manager)
             .expect("Failed to init FetchClientResource");
         InternalSignal::init_class(class_manager).expect("Failed to init InternalSignal");
-        JSReadableStreamResource::init_class(class_manager)
+        FetchRequestResource::init_class(class_manager)
+            .expect("Failed to init FetchRequestResource");
+        ReadableStreamResource::init_class(class_manager)
             .expect("Failed to init JsReadableStream");
         DecodedStreamResource::init_class(class_manager)
             .expect("Failed to init JsResponseBody");
@@ -168,7 +176,7 @@ impl Runtime {
         ctx: &JSContext,
     ) {
         UrlRecord::init_proto(proto_table, class_table, ctx).unwrap();
-        JSReadableStreamResource::init_proto(proto_table, class_table, ctx).unwrap();
+        ReadableStreamResource::init_proto(proto_table, class_table, ctx).unwrap();
         EncodingTextDecoder::init_proto(proto_table, class_table, ctx).unwrap();
         InternalSignal::init_proto(proto_table, class_table, ctx).unwrap();
     }

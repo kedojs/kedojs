@@ -1,39 +1,38 @@
-use std::{convert::Infallible, str::FromStr};
-
-use crate::streams::streams::InternalStreamResource;
-
+use super::{
+    body::InternalBodyStream,
+    decoder::{
+        decoder::StreamDecoder,
+        encoder::StreamEncoder,
+        resource::{DecodedStreamResource, EncodedStreamResource},
+    },
+    headers::HeadersMap,
+};
 use bytes::Bytes;
 use http_body_util::{combinators::BoxBody, BodyExt, Either, Empty, Full};
 use hyper::Uri;
 use kedo_core::downcast_state;
+use kedo_std::BoundedBufferChannel;
 use kedo_utils::downcast_ref;
 use rust_jsc::{JSArray, JSContext, JSError, JSObject, JSResult, JSTypedArray, JSValue};
+use std::{convert::Infallible, str::FromStr};
 
-use super::{
-    body::InternalBodyStream,
-    decoder::StreamDecoder,
-    encoder::StreamEncoder,
-    headers::HeadersMap,
-    lib::{DecodedStreamResource, EncodedStreamResource},
-};
-
-impl TryFrom<(&HeadersMap, JSObject)> for ResponseBody {
+impl TryFrom<(&HeadersMap, &JSObject)> for ResponseBody {
     type Error = JSError;
 
-    fn try_from((headers, value): (&HeadersMap, JSObject)) -> Result<Self, Self::Error> {
+    fn try_from((headers, value): (&HeadersMap, &JSObject)) -> Result<Self, Self::Error> {
         if value.has_property("source") {
             let source = value.get_property("source")?.as_object()?;
             let buffer = JSTypedArray::from(source);
             Ok(ResponseBody::Bytes(Bytes::from(buffer.as_vec()?)))
         } else if value.has_property("stream") {
-            let stream = downcast_ref::<InternalStreamResource<Vec<u8>>>(
+            let stream = downcast_ref::<BoundedBufferChannel<Vec<u8>>>(
                 &value.get_property("stream")?.as_object()?,
             );
             let mut stream = match stream {
                 Some(stream) => stream,
                 None => return Ok(ResponseBody::None),
             };
-            let stream_reader = match stream.as_mut().new_reader() {
+            let stream_reader = match stream.as_mut().aquire_reader() {
                 Some(reader) => reader,
                 None => return Ok(ResponseBody::None),
             };
@@ -113,14 +112,7 @@ impl FetchResponse {
         value.set_property("status", &status, Default::default())?;
         value.set_property("status_message", &status_message, Default::default())?;
 
-        let mut response_headers: Vec<JSValue> = vec![];
-        for (key, value) in self.headers.into_iter() {
-            let key = JSValue::string(ctx, key);
-            let value = JSValue::string(ctx, value);
-            let header = JSArray::new_array(ctx, &[key, value])?;
-            response_headers.push(header.into());
-        }
-        let headers = JSArray::new_array(ctx, response_headers.as_slice())?;
+        let headers = self.headers.to_value(ctx)?;
         value.set_property("headers", &headers, Default::default())?;
 
         match self.body {
@@ -151,13 +143,8 @@ impl FetchResponse {
         Ok(value.into())
     }
 
-    pub fn from_value(ctx: &JSContext, value: JSValue) -> JSResult<FetchResponse> {
-        let value = value.as_object()?;
-        let url: String = value
-            .get_property("url")?
-            .as_object()?
-            .as_string()?
-            .to_string();
+    pub fn from_object(ctx: &JSContext, value: &JSObject) -> JSResult<FetchResponse> {
+        let url: String = value.get_property("url")?.as_string()?.to_string();
         let url = match Uri::from_str(url.as_str()) {
             Ok(url) => url,
             Err(_) => return Err(JSError::new_typ(&ctx, "Invalid URL")?),

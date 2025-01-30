@@ -1,11 +1,11 @@
 mod body;
-mod decoder;
-mod encoder;
+pub mod decoder;
 pub mod fetch;
 mod headers;
-pub mod lib;
-mod request;
+pub mod request;
 mod response;
 pub mod server;
 mod tests;
+pub mod url_module;
+pub mod url_record;
 mod util;

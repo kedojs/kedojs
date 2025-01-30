@@ -1,9 +1,8 @@
-use std::{borrow::BorrowMut, future::Future, net::ToSocketAddrs, pin::Pin, sync::Arc};
-use thiserror::Error;
-
-use crate::http::{body::HttpBody, encoder::StreamEncoder};
+use crate::http::{body::HttpBody, decoder::encoder::StreamEncoder};
 use futures::{channel::oneshot, FutureExt as _, Stream};
 use hyper::{body::Incoming, service::Service, Request, Response};
+use std::{borrow::BorrowMut, future::Future, net::ToSocketAddrs, pin::Pin, sync::Arc};
+use thiserror::Error;
 use tokio::{
     net::TcpListener,
     sync::{

@@ -1,28 +1,33 @@
 
+const encoder = new TextEncoder();
 async function testServerListen() {
     // Test 1: Passing URLSearchParams as the body
     Deno.serve({
         hostname: "localhost",
         port: 8000,
     },
-        (req) => {
-            let timer;
+        async (req) => {
+            // const body = "Hello, World!\n";
             const body = new ReadableStream({
-                async start(controller) {
-                    // timer = setInterval(() => {
-                    controller.enqueue("Hello, World!\n");
+                type: "bytes",
+                start(controller) {
+                    controller.enqueue(encoder.encode("Hello, World! 1\n"));
+                    controller.enqueue(encoder.encode("Hello, World! 2\n"));
+                },
+                async pull(controller) {
+                    controller.enqueue(encoder.encode("Hello, World! 4\n"));
                     controller.close();
-                    // }, 1);
                 },
-                cancel() {
-                    clearInterval(timer);
-                },
+                cancel() { },
             });
-            return new Response(body.pipeThrough(new TextEncoderStream()), {
+            // body.pipeThrough(new TextEncoderStream())
+            let response = new Response(body, {
                 headers: {
                     "content-type": "text/plain; charset=utf-8",
                 },
             });
+            // response.text();
+            return response;
         });
     // Deno.serve(
     //   {

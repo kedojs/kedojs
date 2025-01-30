@@ -1,4 +1,4 @@
-use kedo_core::{define_exports, downcast_state, enqueue_job, native_job};
+use kedo_core::{define_exports, downcast_state, enqueue_job, native_job, ModuleSource};
 use kedo_utils::{js_error, js_undefined};
 use rust_jsc::{callback, JSArray, JSContext, JSError, JSObject, JSResult, JSValue};
 
@@ -20,6 +20,21 @@ define_exports!(
         op_fs_write_file
     ]
 );
+
+pub struct FileSystemModuleLoader;
+
+impl ModuleSource for FileSystemModuleLoader {
+    fn evaluate(&self, ctx: &JSContext, _name: &str) -> JSObject {
+        let exports = JSObject::new(ctx);
+        FileSystemModule::export(ctx, &exports)
+            .expect("Failed to export FileSystemModule");
+        exports
+    }
+
+    fn name(&self) -> &str {
+        "@kedo:op/fs"
+    }
+}
 
 #[callback]
 fn op_fs_read_file_sync(

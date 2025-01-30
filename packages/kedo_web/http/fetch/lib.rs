@@ -1,8 +1,7 @@
+use crate::http::decoder::resource::op_read_decoded_stream;
 use crate::http::fetch::fetch::FetchClient;
 use crate::{
-    http::{
-        fetch::errors::FetchError, lib::op_read_decoded_stream, request::FetchRequest,
-    },
+    http::{fetch::errors::FetchError, request::FetchRequest},
     signals::InternalSignal,
 };
 use kedo_core::{define_exports, downcast_state, enqueue_job, native_job};
@@ -45,6 +44,7 @@ fn op_internal_fetch(
     request_arg: JSValue,
     callback: JSObject,
 ) -> JSResult<JSValue> {
+    callback.protect();
     let request = FetchRequest::from_value(&request_arg, &ctx)?;
     let signal = request_arg.as_object()?.get_property("signal")?;
     let mut internal_signal = None;
@@ -102,6 +102,8 @@ fn op_internal_fetch(
                     callback.call(None, &[err_value.into()])?;
                 }
             }
+
+            callback.unprotect();
             Ok(())
         })
     });
@@ -120,29 +122,3 @@ define_exports!(
         op_read_decoded_stream
     ]
 );
-
-// pub fn fetch_exports(ctx: &JSContext, exports: &JSObject) {
-//     let op_internal_fetch_fn =
-//         JSFunction::callback(ctx, Some("op_internal_fetch"), Some(op_internal_fetch));
-
-//     let op_read_decoded_stream_fn = JSFunction::callback(
-//         ctx,
-//         Some("op_read_decoded_stream"),
-//         Some(op_read_decoded_stream),
-//     );
-
-//     exports
-//         .set_property(
-//             "op_internal_fetch",
-//             &op_internal_fetch_fn,
-//             Default::default(),
-//         )
-//         .expect("Unable to set fetch property");
-//     exports
-//         .set_property(
-//             "op_read_decoded_stream",
-//             &op_read_decoded_stream_fn,
-//             Default::default(),
-//         )
-//         .expect("Unable to set fetch property");
-// }

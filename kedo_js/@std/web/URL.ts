@@ -2,7 +2,7 @@ import {
   parse_url_encoded_form,
   serialize_url_encoded_form,
   UrlRecord,
-} from "@kedo/internal/utils";
+} from "@kedo:op/web";
 
 // | -------------------------------------------- |
 // | https://url.spec.whatwg.org/#urlsearchparams |
@@ -434,4 +434,5 @@ class URL {
   }
 }
 
-export { URLSearchParams, URL };
+export { URL, URLSearchParams };
+

@@ -1,4 +1,4 @@
-use rust_jsc::{JSArray, JSObject};
+use rust_jsc::{JSArray, JSObject, JSString};
 
 #[derive(Debug, Clone, Default)]
 pub struct HeadersMap {
@@ -62,13 +62,19 @@ impl HeadersMap {
     ) -> rust_jsc::JSResult<rust_jsc::JSValue> {
         let mut response_headers: Vec<rust_jsc::JSValue> = vec![];
         for (key, value) in self.inner.iter() {
-            let key = rust_jsc::JSValue::string(ctx, key.as_str());
-            let value = rust_jsc::JSValue::string(ctx, value.as_str());
+            let key = rust_jsc::JSValue::string(ctx, JSString::from(key.as_str()));
+            let value = rust_jsc::JSValue::string(ctx, JSString::from(value.as_str()));
             let header = JSArray::new_array(ctx, &[key, value])?;
+            // We need to protect the header object to prevent it from being garbage collected
+            header.protect();
             response_headers.push(header.into());
         }
 
         let headers = JSArray::new_array(ctx, response_headers.as_slice())?;
+        // Then unprotect the headers array to prevent memory leaks
+        response_headers
+            .iter()
+            .for_each(|header| header.unprotect());
         Ok(headers.into())
     }
 }

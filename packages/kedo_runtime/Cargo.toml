@@ -31,3 +31,4 @@ kedo_core.workspace = true
 kedo_fs.workspace = true
 kedo_macros.workspace = true
 kedo_std.workspace = true
+kedo_web.workspace = true

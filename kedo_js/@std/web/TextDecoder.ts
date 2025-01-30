@@ -1,3 +1,4 @@
+import { isDataView, isTypedArray } from "@kedo/utils";
 import {
   encoding_decode,
   encoding_decode_once,
@@ -5,8 +6,7 @@ import {
   encoding_encode,
   encoding_for_label_no_replacement,
   EncodingTextDecoder,
-} from "@kedo/internal/utils";
-import { isDataView, isTypedArray } from "@kedo/utils";
+} from "@kedo:op/web";
 
 interface TextDecoderOptions {
   fatal?: boolean;

@@ -1,7 +1,7 @@
 use crate::state::downcast_state;
 use rust_jsc::{
     module_evaluate, module_fetch, module_import_meta, module_resolve, JSContext,
-    JSModuleLoader, JSObject, JSStringRetain, JSValue,
+    JSModuleLoader, JSObject, JSStringProctected, JSValue,
 };
 use std::collections::HashMap;
 
@@ -113,7 +113,7 @@ impl CoreModuleLoader {
     }
 
     pub fn init(&self, ctx: &JSContext) {
-        let synthenic_keys: Vec<JSStringRetain> =
+        let synthenic_keys: Vec<JSStringProctected> =
             self.sources.keys().map(|k| k.as_str().into()).collect();
 
         ctx.set_virtual_module_keys(synthenic_keys.as_slice());
@@ -135,7 +135,7 @@ impl CoreModuleLoader {
         module_name: JSValue,
         _referrer: JSValue,
         _script_fetcher: JSValue,
-    ) -> JSStringRetain {
+    ) -> JSStringProctected {
         let state = downcast_state(&ctx);
         let module_loader = state.module_loader().borrow();
         let module_id = module_name
@@ -184,7 +184,7 @@ impl CoreModuleLoader {
         module_name: JSValue,
         _attributes_value: JSValue,
         _script_fetcher: JSValue,
-    ) -> JSStringRetain {
+    ) -> JSStringProctected {
         let binding = downcast_state(&ctx);
         let loader = binding.module_loader().borrow();
         let module_id = module_name

@@ -232,7 +232,7 @@ declare module "@kedo:int/std/stream" {
   export function readableStreamResource(
     stream: ReadableStream,
     size?: number,
-  ): import("@kedo/internal/utils").ReadableStreamResource;
+  ): import("@kedo:op/web").ReadableStreamResource;
   export function readableStreamClose(stream: ReadableStream): void;
   export const createReadableStream: <T>(startAlgorithm: () => void, pullAlgorithm: () => Promise<void>, cancelAlgorithm: (reason: any) => Promise<void>, highWaterMark?: number, sizeAlgorithm?: QueuingStrategySizeCallback<T>) => ReadableStream;
   export const createReadableByteStream: (startAlgorithm: () => void, pullAlgorithm: () => Promise<void>, cancelAlgorithm: (reason: any) => Promise<void>, highWaterMark?: number) => ReadableStream;

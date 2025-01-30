@@ -687,6 +687,12 @@ checksum = "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c"
 
 [[package]]
 name = "futures"
+version = "0.1.31"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a471a38ef8ed83cd6e40aa59c1ffe17db6855c18e3604d9c4ed8c08ebc28678"
+
+[[package]]
+name = "futures"
 version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65bc07b1a8bc7c85c5f2e110c476c7389b4554ba72af57d8445ea63a576b0876"
@@ -762,6 +768,7 @@ version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9fa08315bb612088cc391249efdc3bc77536f16c91f6cf495e6fbe85b20a4a81"
 dependencies = [
+ "futures 0.1.31",
  "futures-channel",
  "futures-core",
  "futures-io",
@@ -1078,7 +1085,7 @@ dependencies = [
 name = "kedo_core"
 version = "0.1.0"
 dependencies = [
- "futures",
+ "futures 0.3.31",
  "kedo_std",
  "kedo_utils",
  "rust_jsc",
@@ -1120,7 +1127,7 @@ dependencies = [
  "bytes",
  "encoding_rs",
  "form_urlencoded",
- "futures",
+ "futures 0.3.31",
  "http-body-util",
  "hyper",
  "hyper-tls",
@@ -1132,6 +1139,7 @@ dependencies = [
  "kedo_std",
  "kedo_timers",
  "kedo_utils",
+ "kedo_web",
  "percent-encoding",
  "rust_jsc",
  "thiserror",
@@ -1146,6 +1154,7 @@ dependencies = [
 name = "kedo_std"
 version = "0.1.0"
 dependencies = [
+ "futures 0.3.31",
  "tokio",
 ]
 
@@ -1165,6 +1174,34 @@ name = "kedo_utils"
 version = "0.1.0"
 dependencies = [
  "rust_jsc",
+]
+
+[[package]]
+name = "kedo_web"
+version = "0.1.0"
+dependencies = [
+ "async-compression",
+ "base64 0.22.1",
+ "bytes",
+ "encoding_rs",
+ "form_urlencoded",
+ "futures 0.3.31",
+ "http-body-util",
+ "hyper",
+ "hyper-tls",
+ "hyper-util",
+ "kedo_core",
+ "kedo_macros",
+ "kedo_std",
+ "kedo_utils",
+ "percent-encoding",
+ "rust_jsc",
+ "thiserror",
+ "tokio",
+ "tokio-native-tls",
+ "tokio-rustls",
+ "tokio-util",
+ "url",
 ]
 
 [[package]]
@@ -1660,7 +1697,7 @@ dependencies = [
 
 [[package]]
 name = "rust_jsc"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "rust_jsc_macros",
  "rust_jsc_sys",
@@ -1668,7 +1705,7 @@ dependencies = [
 
 [[package]]
 name = "rust_jsc_macros"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "proc-macro2",
  "quote",

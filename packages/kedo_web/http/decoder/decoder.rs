@@ -1,10 +1,10 @@
-use std::pin::Pin;
-
+use crate::http::body::IncomingBodyStream;
+use crate::http::fetch::errors::FetchError;
+use crate::http::headers::HeadersMap;
 use async_compression::tokio::bufread::BrotliDecoder;
 use async_compression::tokio::bufread::GzipDecoder;
 use async_compression::tokio::bufread::ZlibDecoder;
 use async_compression::tokio::bufread::ZstdDecoder;
-
 use bytes::Bytes;
 use futures::ready;
 use futures::Stream;
@@ -13,13 +13,10 @@ use hyper::body::SizeHint;
 use hyper::header::CONTENT_ENCODING;
 use hyper::header::CONTENT_LENGTH;
 use hyper::header::TRANSFER_ENCODING;
+use kedo_std::BoundedBufferChannelReader;
+use std::pin::Pin;
 use tokio_util::codec::{BytesCodec, FramedRead};
 use tokio_util::io::StreamReader;
-
-use super::body::IncomingBodyStream;
-use super::headers::HeadersMap;
-use crate::http::fetch::errors::FetchError;
-use crate::streams::streams::InternalStreamResourceReader;
 
 enum DecoderType {
     Gzip,
@@ -90,7 +87,7 @@ impl StreamDecoder {
         }
     }
 
-    pub fn internal_stream(stream: InternalStreamResourceReader<Vec<u8>>) -> Self {
+    pub fn internal_stream(stream: BoundedBufferChannelReader<Vec<u8>>) -> Self {
         Self {
             inner: Inner::InternalStream(stream),
         }
@@ -145,7 +142,7 @@ enum Inner {
     Zstd(Pin<Box<FramedRead<ZstdDecoder<IncomingStreamReader>, BytesCodec>>>),
     Deflate(Pin<Box<FramedRead<ZlibDecoder<IncomingStreamReader>, BytesCodec>>>),
     Plain(IncomingBodyStream),
-    InternalStream(InternalStreamResourceReader<Vec<u8>>),
+    InternalStream(BoundedBufferChannelReader<Vec<u8>>),
 }
 
 impl Stream for StreamDecoder {

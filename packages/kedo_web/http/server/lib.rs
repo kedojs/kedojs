@@ -5,10 +5,10 @@ use super::server::{
 use crate::{
     http::{
         body::IncomingBodyStream,
-        decoder::StreamDecoder,
+        decoder::decoder::StreamDecoder,
         fetch::errors::FetchError,
         headers::HeadersMap,
-        request::{FetchRequest, FetchRequestBuilder, RequestBody},
+        request::{FetchRequest, FetchRequestBuilder, FetchRequestResource, RequestBody},
         response::FetchResponse,
     },
     signals::{InternalSignal, OneshotSignal},
@@ -215,17 +215,18 @@ impl HttpAccepter {
         let request = FetchRequest::try_from(event).expect("Failed to convert request");
 
         NativeJob::new(move |ctx| {
-            let request_object = request.to_object(ctx)?;
             let state = downcast_state(&ctx);
-            let sender = state
-                .classes()
+            let classes = state.classes();
+            let request_object = classes
+                .get(FetchRequestResource::CLASS_NAME)
+                .expect("FetchRequestResource class not found")
+                .object::<FetchRequest>(&ctx, Some(Box::new(request)));
+            let sender = classes
                 .get(RequestEventResource::CLASS_NAME)
                 .expect("RequestEventResource class not found")
                 .object::<RequestEventSender>(&ctx, Some(Box::new(sender)));
 
-            let _ = function
-                .call(None, &[request_object.into(), sender.into()])?
-                .as_object()?;
+            let _ = function.call(None, &[request_object.into(), sender.into()])?;
             Ok(())
         })
     }
@@ -318,11 +319,13 @@ fn op_internal_start_server(
     options_args: JSValue,
     callback: JSObject,
 ) -> JSResult<JSValue> {
+    callback.protect();
     let options = ServerOptions::from_value(&options_args, &ctx)?;
     let signal = options_args.as_object()?.get_property("signal")?;
     let mut internal_signal = None;
     if !signal.is_undefined() && signal.is_object() {
         let signal = signal.as_object()?;
+        signal.protect();
         let oneshot_signal = downcast_ref::<InternalSignal>(&signal)
             .map(|mut signal| signal.as_mut().get_signal());
         if let Some(signal) = oneshot_signal {
@@ -379,47 +382,14 @@ fn op_internal_start_server(
                     callback.call(None, &[error.into()])?;
                 }
             }
+
+            callback.unprotect();
             Ok(())
         })
     });
 
     Ok(js_undefined!(&ctx))
 }
-
-// #[callback]
-// fn op_resolve_address(
-//     ctx: JSContext,
-//     _: JSObject,
-//     _: JSObject,
-//     hostname: String,
-//     callback: JSObject,
-// ) -> JSResult<JSValue> {
-//     let state = downcast_state(&ctx);
-//     let address = tokio::net::lookup_host(hostname);
-
-//     enqueue_job!(state, async move {
-//         let address = address.await;
-//         native_job!("op_resolve_address", move |ctx| {
-//             match address {
-//                 Ok(address) => {
-//                     let address = address
-//                         .map(|addr| addr.ip().to_string())
-//                         .collect::<Vec<String>>()
-//                         .join(",");
-//                     let address = JSValue::from_string(&ctx, &address);
-//                     callback.call(None, &[address])?;
-//                 }
-//                 Err(err) => {
-//                     let error = js_error!(ctx, format!("{}", err));
-//                     callback.call(None, &[error.into()])?;
-//                 }
-//             }
-//             Ok(())
-//         })
-//     });
-
-//     Ok(js_undefined!(&ctx))
-// }
 
 pub fn server_exports(ctx: &JSContext, exports: &JSObject) {
     let op_internal_start_server_fn = JSFunction::callback(
@@ -502,25 +472,18 @@ fn op_send_event_response(
     ctx: JSContext,
     _: JSObject,
     _: JSObject,
-    args: &[JSValue],
+    sender: JSObject,
+    response: JSObject,
 ) -> JSResult<JSValue> {
-    let sender = match args.get(0) {
-        Some(arg) => arg.as_object()?,
-        None => return Err(JSError::new_typ(&ctx, "Missing arguments")?),
-    };
-
-    let response = match args.get(1) {
-        Some(arg) => arg.to_owned(),
-        None => return Err(JSError::new_typ(&ctx, "Missing arguments")?),
-    };
-
-    let response = FetchResponse::from_value(&ctx, response)?;
-    let response = match response.try_into() {
+    sender.protect();
+    response.protect();
+    let fetch_response = FetchResponse::from_object(&ctx, &response)?;
+    let http_response = match fetch_response.try_into() {
         Ok(response) => response,
         Err(err) => return Err(JSError::new_typ(&ctx, format!("{}", err))?)?,
     };
 
-    let sender = match downcast_ref::<RequestEventSender>(&sender) {
+    let http_sender = match downcast_ref::<RequestEventSender>(&sender) {
         Some(sender) => sender.take(),
         None => {
             return Err(js_error_typ!(
@@ -530,7 +493,9 @@ fn op_send_event_response(
         }
     };
 
-    let _ = sender.send(response);
+    let _ = http_sender.send(http_response);
+    response.unprotect();
+    sender.unprotect();
     Ok(JSValue::undefined(&ctx))
 }
 

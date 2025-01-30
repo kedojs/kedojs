@@ -1,3 +1,4 @@
+import { asyncOp } from "@kedo/utils";
 import {
   op_fs_read_dir,
   op_fs_read_dir_sync,
@@ -7,8 +8,7 @@ import {
   op_fs_remove_sync,
   op_fs_write_file,
   op_fs_write_file_sync,
-} from "@kedo/internal/utils";
-import { asyncOp } from "@kedo/utils";
+} from "@kedo:op/fs";
 
 export class DirEntry {
   readonly name: string;

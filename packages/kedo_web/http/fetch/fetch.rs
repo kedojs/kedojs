@@ -1,6 +1,6 @@
 use super::errors::FetchError;
 use crate::http::body::IncomingBodyStream;
-use crate::http::decoder::StreamDecoder;
+use crate::http::decoder::decoder::StreamDecoder;
 use crate::http::headers::HeadersMap;
 use crate::http::request::{FetchRequest, RequestBody, RequestRedirect};
 use crate::http::response::{FetchResponse, ResponseBody};
@@ -288,15 +288,14 @@ impl FetchClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::http::request::FetchRequestBuilder;
     use crate::http::request::{RequestBody, RequestRedirect};
     use crate::http::tests::test_utils::start_test_server;
-    use crate::{
-        http::request::FetchRequestBuilder, streams::streams::InternalStreamResource,
-    };
     use bytes::Bytes;
     use futures::stream::StreamExt;
     use futures::TryStreamExt;
     use hyper::{body, Response};
+    use kedo_std::BoundedBufferChannel;
 
     fn build_redirect_response(
         location: &str,
@@ -428,8 +427,8 @@ mod tests {
     #[tokio::test]
     async fn test_fetch_redirect_with_stream_body() {
         let client = FetchClient::new();
-        let mut internal_stream = InternalStreamResource::new(10);
-        internal_stream.write(vec![1, 2, 3, 4]).unwrap();
+        let mut internal_stream = BoundedBufferChannel::new(10);
+        internal_stream.try_write(vec![1, 2, 3, 4]).unwrap();
 
         let request = FetchRequestBuilder::new()
             .method("POST")
@@ -440,7 +439,7 @@ mod tests {
             )]))
             .body(RequestBody::Stream(
                 internal_stream
-                    .new_reader()
+                    .aquire_reader()
                     .map(StreamDecoder::internal_stream),
             ))
             .redirect(RequestRedirect::Follow)
@@ -492,8 +491,8 @@ mod tests {
     #[tokio::test]
     async fn test_fetch_redirect_with_stream_error() {
         let client = FetchClient::new();
-        let mut internal_stream = InternalStreamResource::new(10);
-        internal_stream.write(vec![1, 2, 3, 4]).unwrap();
+        let mut internal_stream = BoundedBufferChannel::new(10);
+        internal_stream.try_write(vec![1, 2, 3, 4]).unwrap();
 
         let request = FetchRequestBuilder::new()
             .method("POST")
@@ -504,7 +503,7 @@ mod tests {
             ]))
             .body(RequestBody::Stream(
                 internal_stream
-                    .new_reader()
+                    .aquire_reader()
                     .map(StreamDecoder::internal_stream),
             ))
             .redirect(RequestRedirect::Follow)

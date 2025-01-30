@@ -59,10 +59,18 @@ type RequestPriority = "high" | "low" | "auto";
 
 declare type PropertyNameKind = "KeyAndValue" | "Key" | "Value";
 
+interface ExtractedBody {
+    stream: import("@kedo/stream").ReadableStream | null;
+    source: Uint8Array | null;
+    length: number | null;
+    type: string | null;
+}
 interface TextDecoderOptions {
     fatal?: boolean;
     ignoreBOM?: boolean;
 }
+
+type MixingBodyInput = import("@kedo:int/std/web").Request | import("@kedo:int/std/web").Response;
 
 interface TextDecodeOptions {
     stream?: boolean;
@@ -111,7 +119,7 @@ interface RequestInit {
     redirect?: RequestRedirect;
     integrity?: string;
     keepalive?: boolean;
-    signal?: AbortSignal | null;
+    signal?: import("@kedo:int/std/web").AbortSignal | null;
     duplex?: RequestDuplex;
     priority?: RequestPriority;
 }
@@ -129,8 +137,7 @@ declare module "@kedo/web" {
 
 declare module "@kedo:int/std/web" {
 
-    import { IterableWeakSet } from "@kedo/ds";
-
+    import { EventTarget } from "@kedo/events";
     type ForEachCallback = (
         value: string,
         name: string,
@@ -142,11 +149,6 @@ declare module "@kedo:int/std/web" {
         headersMap: Headers,
         headersGuard?: HeadersGuard,
     ) => void;
-
-    const _headersIterator: unique symbol;
-    const _headerList: unique symbol;
-    const _setCookieValues: unique symbol;
-    const _headersGuard: unique symbol;
 
     const headerInnerList: (headers: Headers) => [string, string][];
 
@@ -167,103 +169,23 @@ declare module "@kedo:int/std/web" {
      * ```
      */
     class Headers {
-        [_headerList]: [string, string][];
-        [_setCookieValues]: string[];
-        [_headersGuard]: HeadersGuard;
         constructor(init: HeadersInit);
         append(name: string, value: string): void;
         delete(name: string): void;
-        get(name: string): string;
+        get(name: string): string | null;
         has(name: string): boolean;
         set(name: string, value: string): void;
         forEach(callback: ForEachCallback, thisArg?: any): void;
         [Symbol.toStringTag]: string;
-        [_headersIterator](propertyNameKind?: PropertyNameKind): {
-            [Symbol.iterator](): any;
-            [Symbol.toStringTag]: string;
-            next: () =>
-                | {
-                    done: boolean;
-                    value?: undefined;
-                }
-                | {
-                    value: [string, string];
-                    done: boolean;
-                }
-                | {
-                    value: string;
-                    done: boolean;
-                };
-        };
         [Symbol.iterator](): {
             [Symbol.iterator](): any;
             [Symbol.toStringTag]: string;
-            next: () =>
-                | {
-                    done: boolean;
-                    value?: undefined;
-                }
-                | {
-                    value: [string, string];
-                    done: boolean;
-                }
-                | {
-                    value: string;
-                    done: boolean;
-                };
+            next: () => IteratorResult<string | [string, string] | undefined>;
         };
         getSetCookie(): string[];
-        entries(): {
-            [Symbol.iterator](): any;
-            [Symbol.toStringTag]: string;
-            next: () =>
-                | {
-                    done: boolean;
-                    value?: undefined;
-                }
-                | {
-                    value: [string, string];
-                    done: boolean;
-                }
-                | {
-                    value: string;
-                    done: boolean;
-                };
-        };
-        keys(): {
-            [Symbol.iterator](): any;
-            [Symbol.toStringTag]: string;
-            next: () =>
-                | {
-                    done: boolean;
-                    value?: undefined;
-                }
-                | {
-                    value: [string, string];
-                    done: boolean;
-                }
-                | {
-                    value: string;
-                    done: boolean;
-                };
-        };
-        values(): {
-            [Symbol.iterator](): any;
-            [Symbol.toStringTag]: string;
-            next: () =>
-                | {
-                    done: boolean;
-                    value?: undefined;
-                }
-                | {
-                    value: [string, string];
-                    done: boolean;
-                }
-                | {
-                    value: string;
-                    done: boolean;
-                };
-        };
+        entries(): IterableIterator<[string, string]>;
+        keys(): IterableIterator<string>;
+        values(): IterableIterator<string>;
     }
 
     const emptyHeader: (headersMap: Headers) => void;
@@ -365,15 +287,6 @@ declare module "@kedo:int/std/web" {
         }): DOMException;
     }
 
-    const _abortReason: unique symbol;
-    const _abortAlgorithms: unique symbol;
-    const _dependent: unique symbol;
-    const _sourceSignals: unique symbol;
-    const _dependentSignals: unique symbol;
-    const _signalAbort: unique symbol;
-    const _addAlgorithm: unique symbol;
-    const _removeAlgorithm: unique symbol;
-
     interface AbortAlgorithm {
         (): void;
     }
@@ -423,11 +336,6 @@ declare module "@kedo:int/std/web" {
      * ```
      */
     class AbortSignal extends EventTarget {
-        [_abortReason]: any;
-        [_abortAlgorithms]: Set<AbortAlgorithm>;
-        [_dependent]: boolean;
-        [_sourceSignals]: IterableWeakSet<AbortSignal>;
-        [_dependentSignals]: IterableWeakSet<AbortSignal>;
         constructor(key?: any);
         get aborted(): boolean;
         get reason(): any;
@@ -436,14 +344,11 @@ declare module "@kedo:int/std/web" {
         static timeout(ms: number): AbortSignal;
         static any(signals: AbortSignal[]): AbortSignal;
         set onabort(listener: EventListener);
-        [_signalAbort](reason?: any): void;
-        [_addAlgorithm](algorithm: AbortAlgorithm): void;
-        [_removeAlgorithm](algorithm: AbortAlgorithm): void;
     }
 
     const createDependentAbortSignal: (signals: AbortSignal[]) => AbortSignal;
 
-    const _signal: unique symbol;
+    // const _signal: unique symbol;
 
     /**
      * Provides an object that can abort one or more associated requests.
@@ -468,7 +373,7 @@ declare module "@kedo:int/std/web" {
      *                 operation was canceled.
      */
     class AbortController {
-        [_signal]: AbortSignal;
+        // [_signal]: AbortSignal;
         constructor();
         get signal(): AbortSignal;
         abort(reason?: any): void;
@@ -613,8 +518,8 @@ declare module "@kedo:int/std/web" {
      * @throws {TypeError} When the URL is invalid or cannot be parsed
      */
     class URL {
-        [_queryObject]: URLSearchParams;
-        [_urlRecord]: import("@kedo/internal/utils").UrlRecord;
+        // [_queryObject]: URLSearchParams;
+        // [_urlRecord]: import("@kedo:op/web").UrlRecord;
         constructor(url: string, base?: string);
         static parse(url: string, base?: string): URL | null;
         static canParse(url: string, base?: string): boolean;

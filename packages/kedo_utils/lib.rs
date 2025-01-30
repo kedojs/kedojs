@@ -1,7 +1,9 @@
 mod globals;
+mod traits;
 mod utils;
 
 pub use globals::JSGlobalObject;
+pub use traits::TryClone;
 pub use utils::downcast_ptr;
 pub use utils::downcast_ref;
 pub use utils::drop_ptr;

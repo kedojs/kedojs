@@ -77,18 +77,18 @@ fn main() {
             let mut runtime = Runtime::new();
             runtime.add_loader(std_loader::StdModuleLoader::default());
             // Load the standard library
-            let result =
-                runtime.evaluate_module_from_source(STD_INDEX, "src/@std/index.js", None);
-            // let result = runtime.evaluate_module("./src/@std/dist/index.js");
-            // match result {
-            //     Ok(_) => {
-            //         println!("Standard library loaded");
-            //     }
-            //     Err(e) => {
-            //         println!("Error: {}", e.message().unwrap());
-            //     }
-            // }
-            assert!(result.is_ok());
+            // let result =
+            //     runtime.evaluate_module_from_source(STD_INDEX, "src/@std/index.js", None);
+            let result = runtime.evaluate_module("./build/@std/dist/index.js");
+            match result {
+                Ok(_) => {
+                    println!("Standard library loaded");
+                }
+                Err(e) => {
+                    println!("Error: {}", e.message().unwrap());
+                }
+            }
+            // assert!(result.is_ok());
             // println!(
             //     "Result Check: {:?}",
             //     runtime.check_syntax("console.log('Kevin')", None).unwrap()
@@ -126,7 +126,7 @@ fn main() {
             minify,
         }) => {
             // let args = BundleArgs {
-            //     external_modules: vec!["@kedo/internal/utils".to_string()],
+            //     external_modules: vec!["@kedo:op/web".to_string()],
             //     entry: entry.into(),
             //     output: output.into(),
             //     minify: *minify,
