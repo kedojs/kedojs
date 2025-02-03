@@ -7,7 +7,7 @@ import {
   op_write_readable_stream,
   op_write_sync_readable_stream,
   ReadableStreamResource
-} from "@kedo/internal/utils";
+} from "@kedo:op/web";
 
 // Helper function to compare two Uint8Arrays
 function arraysEqual(a, b) {

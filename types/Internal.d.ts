@@ -4,6 +4,8 @@ type RequestEventResource = {};
 
 type HttpResponse = {
     readonly body?: DecodedBodyStream;
+    stream?: import("@kedo:op/web").ReadableStreamResource;
+    source?: Uint8Array;
     readonly headers: [string, string][];
     readonly status: number;
     readonly status_message: string;
@@ -28,6 +30,7 @@ type InternalServerHandler = (
     request: HttpRequestResource,
     sender: RequestEventResource,
 ) => void;
+type OnErrorHandler = (error: any) => import("@kedo:int/std/web").Response | Promise<import("@kedo:int/std/web").Response>;
 
 type InternalServerOptions = {
     hostname: string;
@@ -36,6 +39,7 @@ type InternalServerOptions = {
     cert?: string;
     signal?: import("@kedo:op/web").InternalSignal;
     handler: InternalServerHandler;
+    onError?: OnErrorHandler;
 };
 
 declare module "@kedo:op/web" {
@@ -150,22 +154,8 @@ declare module "@kedo:op/fs" {
     export function op_fs_read_dir_sync(path: string): DirEntry[];
     export function op_fs_write_file_sync(path: string, data: string): void;
     export function op_fs_remove_sync(path: string, recursive: boolean): void;
-    export function op_fs_read_file(
-        path: string,
-        callback: OpStyleCallback<string>,
-    ): void;
-    export function op_fs_write_file(
-        path: string,
-        data: string,
-        callback: OpStyleCallback<void>,
-    ): void;
-    export function op_fs_read_dir(
-        path: string,
-        callback: OpStyleCallback<DirEntry>,
-    ): void;
-    export function op_fs_remove(
-        path: string,
-        recursive: boolean,
-        callback: OpStyleCallback<void>,
-    ): void;
+    export function op_fs_read_file(path: string, callback: OpStyleCallback<string>): void;
+    export function op_fs_write_file(path: string, data: string, callback: OpStyleCallback<void>): void;
+    export function op_fs_read_dir(path: string, callback: OpStyleCallback<DirEntry>): void;
+    export function op_fs_remove(path: string, recursive: boolean, callback: OpStyleCallback<void>): void;
 }

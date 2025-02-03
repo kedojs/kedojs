@@ -54,16 +54,15 @@ Roadmap to v0.1.0
     - [ ] mkdir
     - [ ] mkdirSync
 - [x] Console API
-- [ ] HTTP Server
-    - [ ] serve
-- [ ] Web API
-    - [ ] Fetch (WIP)
+- [x] HTTP Server
+    - [x] serve
+- [x] Web API
+    - [x] Fetch (WIP)
     - [x] URL
     - [x] URLSearchParams
     - [x] Headers
     - [x] Request
     - [x] Response
-- [ ] Child Process
 - [ ] OS
 - [x] Timers
     - [x] setTimeout

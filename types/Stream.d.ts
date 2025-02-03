@@ -152,7 +152,7 @@ declare module "@kedo:int/std/stream" {
    *
    * @public
    */
-  class ReadableStream {
+  export class ReadableStream {
     constructor(underlyingSource?: UnderlyingSource | null, strategy?: QueuingStrategy);
     get locked(): boolean;
     cancel(reason: any): Promise<void>;

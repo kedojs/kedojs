@@ -1,12 +1,12 @@
 import assert from "@kedo/assert";
+import { ReadableStream } from "@kedo/stream";
 import {
     ReadableStreamResource,
     op_acquire_stream_reader,
     op_close_stream_resource,
     op_read_readable_stream,
     op_write_readable_stream
-} from "@kedo/internal/utils";
-import { ReadableStream } from "@kedo/stream";
+} from "@kedo:op/web";
 
 function asyncOp(fn, ...args) {
     return new Promise((resolve, reject) => {

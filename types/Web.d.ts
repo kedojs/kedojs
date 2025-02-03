@@ -124,6 +124,44 @@ interface RequestInit {
     priority?: RequestPriority;
 }
 
+interface IRequest {
+    url: string;
+    method: string;
+    headers: Headers;
+    referrer: string;
+    referrerPolicy: ReferrerPolicy;
+    mode: RequestMode;
+    credentials: RequestCredentials;
+    cache: RequestCache;
+    redirect: RequestRedirect;
+    integrity: string;
+    keepalive: boolean;
+    signal: AbortSignal;
+    duplex: string;
+    body: ReadableStream | null;
+    bodyUsed: boolean;
+    bytes(): Promise<Uint8Array>;
+    text(): Promise<string>;
+    json(): Promise<any>;
+    arrayBuffer(): Promise<ArrayBuffer>;
+    clone(): IRequest;
+}
+
+interface IResponse {
+    type: ResponseType;
+    url: string;
+    redirected: boolean;
+    status: number;
+    ok: boolean;
+    statusText: string;
+    headers: Headers;
+    clone(): Response;
+    body: ReadableStream | null;
+    arrayBuffer(): Promise<ArrayBuffer>;
+    json(): Promise<any>;
+    text(): Promise<string>;
+}
+
 declare module "@kedo/web" {
     export {
         AbortController,
