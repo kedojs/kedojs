@@ -1,8 +1,7 @@
-use crate::http::decoder::decoder::StreamDecoder;
-use crate::http::decoder::encoder::StreamEncoder;
 use futures::StreamExt;
 use kedo_core::{downcast_state, enqueue_job, native_job};
 use kedo_macros::js_class;
+use kedo_std::{StreamDecoder, StreamEncoder};
 use kedo_utils::{downcast_ref, js_error, js_error_typ, js_undefined};
 use rust_jsc::{callback, JSContext, JSError, JSObject, JSResult, JSTypedArray, JSValue};
 use std::mem::ManuallyDrop;

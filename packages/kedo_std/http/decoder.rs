@@ -1,6 +1,7 @@
 use crate::http::body::IncomingBodyStream;
-use crate::http::fetch::errors::FetchError;
+use crate::http::errors::FetchError;
 use crate::http::headers::HeadersMap;
+use crate::BoundedBufferChannelReader;
 use async_compression::tokio::bufread::BrotliDecoder;
 use async_compression::tokio::bufread::GzipDecoder;
 use async_compression::tokio::bufread::ZlibDecoder;
@@ -13,7 +14,6 @@ use hyper::body::SizeHint;
 use hyper::header::CONTENT_ENCODING;
 use hyper::header::CONTENT_LENGTH;
 use hyper::header::TRANSFER_ENCODING;
-use kedo_std::BoundedBufferChannelReader;
 use std::pin::Pin;
 use tokio_util::codec::{BytesCodec, FramedRead};
 use tokio_util::io::StreamReader;
@@ -40,7 +40,7 @@ impl TryFrom<&str> for DecoderType {
 }
 
 #[derive(Debug)]
-pub(crate) struct StreamDecoder {
+pub struct StreamDecoder {
     inner: Inner,
 }
 
@@ -203,11 +203,8 @@ impl Stream for StreamDecoder {
                 Inner::Plain(ref mut stream) => Pin::new(stream).poll_next(cx),
                 Inner::InternalStream(ref mut stream) => {
                     match Pin::new(stream).poll_next(cx) {
-                        std::task::Poll::Ready(Some(Ok(chunk))) => {
+                        std::task::Poll::Ready(Some(chunk)) => {
                             std::task::Poll::Ready(Some(Ok(Bytes::from(chunk))))
-                        }
-                        std::task::Poll::Ready(Some(Err(e))) => {
-                            std::task::Poll::Ready(Some(Err(FetchError::from(e))))
                         }
                         std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
                         std::task::Poll::Pending => std::task::Poll::Pending,
@@ -295,14 +292,9 @@ impl Body for StreamDecoder {
                 }
                 Inner::InternalStream(ref mut stream) => {
                     match Pin::new(stream).poll_next(cx) {
-                        std::task::Poll::Ready(Some(Ok(chunk))) => {
-                            std::task::Poll::Ready(Some(Ok(hyper::body::Frame::data(
-                                Bytes::from(chunk),
-                            ))))
-                        }
-                        std::task::Poll::Ready(Some(Err(e))) => {
-                            std::task::Poll::Ready(Some(Err(FetchError::from(e))))
-                        }
+                        std::task::Poll::Ready(Some(chunk)) => std::task::Poll::Ready(
+                            Some(Ok(hyper::body::Frame::data(Bytes::from(chunk)))),
+                        ),
                         std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
                         std::task::Poll::Pending => std::task::Poll::Pending,
                     }

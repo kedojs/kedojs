@@ -94,8 +94,9 @@ function serve(
 }
 
 function serverHandler(handler: ServerHandler, onError?: OnErrorHandler): InternalServerHandler {
-    const asyncHandler = async (request: Request) => {
-        const response = await handler(request);
+    const asyncHandler = async (request: HttpRequestResource) => {
+        const requestObject = toRequest(request);
+        const response = await handler(requestObject);
         return response;
     };
 
@@ -110,8 +111,7 @@ function serverHandler(handler: ServerHandler, onError?: OnErrorHandler): Intern
     }
 
     const internalHandler = (request: HttpRequestResource, sender: RequestEventResource) => {
-        const requestObject = toRequest(request);
-        asyncHandler(requestObject)
+        asyncHandler(request)
             .then((response) => {
                 const httpResponse = toHttpResponse(response);
                 op_send_event_response(sender, httpResponse);

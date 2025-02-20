@@ -2,18 +2,18 @@ import { Queue } from "@kedo/ds";
 import {
   assert,
   AsyncIteratorPrototype,
-  asyncOp,
   Deferred,
   getIterator,
   isArrayBuffer,
   isObject,
   isPrototypeOf,
-  isTypedArray,
+  isTypedArray
 } from "@kedo/utils";
 import {
   is_array_buffer_detached,
   op_close_stream_resource,
   op_write_readable_stream,
+  op_write_sync_readable_stream,
   ReadableStreamResource
 } from "@kedo:op/web";
 
@@ -153,6 +153,8 @@ const _view = Symbol("[view]");
 const _autoAllocateChunkSize = Symbol("[autoAllocateChunkSize]");
 const _preventCancel = Symbol("[preventCancel]");
 
+const _readable = 'readable';
+
 //x https://streams.spec.whatwg.org/#is-readable-stream-locked
 function isReadableStreamLocked(stream: ReadableStream) {
   // 1. If stream.[[reader]] is undefined, return false.
@@ -170,7 +172,12 @@ function isInReadableState(stream: ReadableStream) {
   return stream[_state] === "readable";
 }
 
-async function writeIntoResourceFromReadableStream(
+function closeStreamResource(resource: ReadableStreamResource, reader: ReadableStreamDefaultReader) {
+  reader.cancel("Resource stream closed");
+  op_close_stream_resource(resource);
+}
+
+function writeIntoResourceFromReadableStream(
   resource: ReadableStreamResource,
   reader: ReadableStreamDefaultReader,
   chunk: Uint8Array,
@@ -180,10 +187,23 @@ async function writeIntoResourceFromReadableStream(
     return;
   }
 
-  const output = await asyncOp(op_write_readable_stream, resource, chunk);
+  const output = op_write_sync_readable_stream(resource, chunk);
   if (output === -1) {
-    reader.cancel("Resource stream closed");
-    op_close_stream_resource(resource);
+    closeStreamResource(resource, reader);
+  } else if (output === -2) {
+    // stream is full
+    op_write_readable_stream(resource, chunk, (err, result) => {
+      if (err) {
+        closeStreamResource(resource, reader);
+        return;
+      }
+
+      if (result === -1) {
+        closeStreamResource(resource, reader);
+      } else {
+        readIntoResourceFromReadableStream(resource, reader);
+      }
+    });
   } else {
     readIntoResourceFromReadableStream(resource, reader);
   }
@@ -198,9 +218,7 @@ function readIntoResourceFromReadableStream(
   // 2. Let readRequest be a new read request with the following items:
   const readRequest = {
     chunkSteps: (chunk: Uint8Array) => {
-      writeIntoResourceFromReadableStream(resource, reader, chunk)
-        .then(() => { })
-        .catch(() => { });
+      writeIntoResourceFromReadableStream(resource, reader, chunk);
     },
     closeSteps: () => {
       op_close_stream_resource(resource);
@@ -1458,7 +1476,7 @@ const readableByteStreamControllerShouldCallPull = (
   // 1. Let stream be controller.[[stream]].
   const stream = controller[_stream];
   // 2. If stream.[[state]] is not "readable", return false.
-  if (stream[_state] !== "readable") return false;
+  if (stream[_state] !== _readable) return false;
   // 3. If controller.[[closeRequested]] is true, return false.
   if (controller[_closeRequested] === true) return false;
   // 4. If controller.[[started]] is false, return false.
@@ -1899,10 +1917,11 @@ class ReadableStreamBYOBReader implements IReadableStreamBYOBReader {
 //                ReadableByteStreamController                    |
 // ---------------------------------------------------------------|
 
+// TODO: each call to this function should check if the buffer is detached.
 //x https://streams.spec.whatwg.org/#transfer-array-buffer
 function transferArrayBuffer(buffer: ArrayBuffer): ArrayBuffer {
   // 1. Assert: ! IsDetachedBuffer(O) is false.
-  assert(is_array_buffer_detached(buffer) === false, "Buffer is detached");
+  // assert(is_array_buffer_detached(buffer) === false, "Buffer is detached");
   // https://tc39.es/proposal-arraybuffer-transfer/#sec-arraybuffer.prototype.transfer
   return buffer.transfer();
 }
@@ -2492,7 +2511,7 @@ const readableByteStreamControllerEnqueue = (
   // 1. Let stream be controller.[[stream]].
   const stream = controller[_stream];
   // 2. If controller.[[closeRequested]] is true or stream.[[state]] is not "readable", return.
-  if (controller[_closeRequested] === true || stream[_state] !== "readable")
+  if (controller[_closeRequested] === true || stream[_state] !== _readable)
     return;
   // 3. Let buffer be chunk.[[ViewedArrayBuffer]].
   const buffer = chunk.buffer as ArrayBuffer;
@@ -2501,7 +2520,7 @@ const readableByteStreamControllerEnqueue = (
   // 5. Let byteLength be chunk.[[ByteLength]].
   const byteLength = chunk.byteLength;
   // 6. If ! IsDetachedBuffer(buffer) is true, throw a TypeError exception.
-  if (is_array_buffer_detached(buffer))
+  if (buffer.detached)
     throw new TypeError("Buffer is detached");
   // 7. Let transferredBuffer be ? TransferArrayBuffer(buffer).
   const transferredBuffer = transferArrayBuffer(buffer);
@@ -2510,7 +2529,7 @@ const readableByteStreamControllerEnqueue = (
     // 8.1. Let firstPendingPullInto be controller.[[pendingPullIntos]][0].
     const firstPendingPullInto = controller[_pendingPullIntos][0];
     // 8.2 If ! IsDetachedBuffer(firstPendingPullInto’s buffer) is true, throw a TypeError exception.
-    if (is_array_buffer_detached(firstPendingPullInto.buffer))
+    if (firstPendingPullInto.buffer.detached)
       throw new TypeError("Buffer is detached");
     // 8.3 Perform ! ReadableByteStreamControllerInvalidateBYOBRequest(controller).
     readableByteStreamControllerInvalidateBYOBRequest(controller);
@@ -2600,7 +2619,7 @@ const readableStreamCloseByteController = (stream: ReadableStream) => {
   if (controller[_closeRequested] === true)
     throw new TypeError("Close requested is true");
   // 2. If this.[[stream]].[[state]] is not "readable", throw a TypeError exception.
-  if (controller[_stream][_state] !== "readable")
+  if (controller[_stream][_state] !== _readable)
     throw new TypeError("Stream is not readable");
   // 3. Perform ? ReadableByteStreamControllerClose(this).
   readableByteStreamControllerClose(controller);

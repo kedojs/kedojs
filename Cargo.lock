@@ -1122,7 +1122,6 @@ dependencies = [
 name = "kedo_runtime"
 version = "0.1.0"
 dependencies = [
- "async-compression",
  "base64 0.22.1",
  "bytes",
  "encoding_rs",
@@ -1154,8 +1153,20 @@ dependencies = [
 name = "kedo_std"
 version = "0.1.0"
 dependencies = [
+ "async-compression",
+ "base64 0.22.1",
+ "bytes",
  "futures 0.3.31",
+ "http-body-util",
+ "hyper",
+ "hyper-tls",
+ "hyper-util",
+ "percent-encoding",
+ "thiserror",
  "tokio",
+ "tokio-native-tls",
+ "tokio-rustls",
+ "tokio-util",
 ]
 
 [[package]]
@@ -1180,27 +1191,17 @@ dependencies = [
 name = "kedo_web"
 version = "0.1.0"
 dependencies = [
- "async-compression",
- "base64 0.22.1",
  "bytes",
  "encoding_rs",
  "form_urlencoded",
  "futures 0.3.31",
- "http-body-util",
  "hyper",
- "hyper-tls",
- "hyper-util",
  "kedo_core",
  "kedo_macros",
  "kedo_std",
  "kedo_utils",
- "percent-encoding",
  "rust_jsc",
- "thiserror",
  "tokio",
- "tokio-native-tls",
- "tokio-rustls",
- "tokio-util",
  "url",
 ]
 

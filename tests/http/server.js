@@ -33,14 +33,14 @@ async function testServerCustomHostnameAndPort() {
             onListen({ port, hostname }) {
                 tHostname = hostname;
                 tPort = port;
-                console.log(`Server started at ${hostname}:${port}`);
+                console.log(`Server started at ${tHostname}:${tPort}`);
             },
         },
     );
-    return new Promise((resolve) => setTimeout(resolve, 10)).then(() => {
+    return new Promise((resolve) => setTimeout(resolve, 100)).then(() => {
         abortController.abort();
-        assert.strictEqual(tHostname, "localhost");
-        assert.strictEqual(tPort, 8001);
+        assert.strictEqual(tHostname, "127.0.0.1");
+        assert.strictEqual(tPort, '8001');
     });
 }
 

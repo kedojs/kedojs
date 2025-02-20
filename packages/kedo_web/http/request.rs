@@ -1,86 +1,69 @@
-use super::{
-    decoder::{decoder::StreamDecoder, resource::DecodedStreamResource},
-    headers::HeadersMap,
-};
+use super::headers::HeadersMapExt;
+use crate::DecodedStreamResource;
 use bytes::Bytes;
-use hyper::Uri;
 use kedo_core::{define_exports, downcast_state};
 use kedo_macros::js_class;
-use kedo_std::BoundedBufferChannel;
-use kedo_utils::{downcast_ref, TryClone};
+use kedo_std::{
+    BoundedBufferChannel, FetchError, FetchRequest, FetchRequestBuilder, HeadersMap,
+    IncomingBodyStream, RequestBody, RequestEvent, RequestRedirect, StreamDecoder,
+};
+use kedo_utils::downcast_ref;
 use rust_jsc::{
     callback, JSArray, JSContext, JSError, JSObject, JSResult, JSTypedArray, JSValue,
 };
 use std::mem::ManuallyDrop;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum RequestRedirect {
-    Follow,
-    Error,
-    Manual,
+pub trait FetchRequestExt {
+    fn from_value(value: &JSValue, ctx: &JSContext) -> JSResult<FetchRequest>;
+    fn from_event(value: RequestEvent) -> Result<FetchRequest, FetchError>;
 }
 
-impl From<&str> for RequestRedirect {
-    fn from(value: &str) -> Self {
-        match value {
-            "follow" => RequestRedirect::Follow,
-            "error" => RequestRedirect::Error,
-            "manual" => RequestRedirect::Manual,
-            _ => RequestRedirect::Follow,
+impl FetchRequestExt for FetchRequest {
+    fn from_value(value: &JSValue, ctx: &JSContext) -> JSResult<FetchRequest> {
+        fetch_request_from_value(value, ctx)
+    }
+
+    fn from_event(value: RequestEvent) -> Result<FetchRequest, FetchError> {
+        let mut headers = HeadersMap::default();
+        for (name, value) in value.req.headers() {
+            let value_str = value.to_str();
+            if let Ok(value_str) = value_str {
+                headers.append(name.as_str(), value_str);
+            }
         }
+
+        // check keep alive from headers
+        let keep_alive = headers
+            .get("connection")
+            .map(|value| value.to_lowercase() == "keep-alive")
+            .unwrap_or(false);
+
+        let method = value.req.method().as_str().to_string();
+        let uri = value.req.uri().clone();
+        let body_stream = IncomingBodyStream::new(value.req.into_body());
+        let decoded_body = StreamDecoder::detect(body_stream, &headers);
+
+        let request = FetchRequestBuilder::new()
+            .method(method)
+            .uri(uri)
+            .headers(headers)
+            .keep_alive(keep_alive)
+            .body(RequestBody::Stream(Some(decoded_body)))
+            .build()
+            .map_err(|e| FetchError {
+                message: "Failed to build fetch request".into(),
+                inner: Some(e.into()),
+            })?;
+        Ok(request)
     }
 }
 
-impl From<String> for RequestRedirect {
-    fn from(value: String) -> Self {
-        match value.as_str() {
-            "follow" => RequestRedirect::Follow,
-            "error" => RequestRedirect::Error,
-            "manual" => RequestRedirect::Manual,
-            _ => RequestRedirect::Follow,
-        }
-    }
+pub trait RequestBodyExt {
+    fn to_object(self, ctx: &JSContext) -> JSResult<Option<JSObject>>;
+    fn from_object(obj: &JSObject) -> Result<RequestBody, JSError>;
 }
 
-impl From<u8> for RequestRedirect {
-    fn from(value: u8) -> Self {
-        match value {
-            0 => RequestRedirect::Follow,
-            1 => RequestRedirect::Error,
-            2 => RequestRedirect::Manual,
-            _ => RequestRedirect::Follow,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum RequestBody {
-    None,
-    Bytes(Bytes),
-    Stream(Option<StreamDecoder>),
-}
-
-impl RequestBody {
-    pub fn is_none(&self) -> bool {
-        matches!(self, RequestBody::None)
-    }
-
-    pub fn is_bytes(&self) -> bool {
-        matches!(self, RequestBody::Bytes(_))
-    }
-
-    pub fn is_stream(&self) -> bool {
-        matches!(self, RequestBody::Stream(_))
-    }
-
-    pub fn is_none_stream(&self) -> bool {
-        matches!(self, RequestBody::Stream(None))
-    }
-
-    fn take(&mut self) -> Self {
-        std::mem::replace(self, RequestBody::None)
-    }
-
+impl RequestBodyExt for RequestBody {
     fn to_object(self, ctx: &JSContext) -> JSResult<Option<JSObject>> {
         match self {
             RequestBody::None => Ok(None),
@@ -107,132 +90,15 @@ impl RequestBody {
             RequestBody::Stream(None) => Ok(None),
         }
     }
-}
 
-impl TryClone for RequestBody {
-    fn try_clone(&self) -> Option<Self> {
-        match self {
-            RequestBody::None => Some(RequestBody::None),
-            RequestBody::Bytes(bytes) => Some(RequestBody::Bytes(bytes.clone())),
-            RequestBody::Stream(_) => None, // Cannot clone streams
-        }
-    }
-}
-
-impl Clone for RequestBody {
-    fn clone(&self) -> Self {
-        match self {
-            RequestBody::None => RequestBody::None,
-            RequestBody::Bytes(bytes) => RequestBody::Bytes(bytes.clone()),
-            RequestBody::Stream(_) => RequestBody::Stream(None),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct FetchRequest {
-    pub method: String,
-    pub uri: Uri,
-    pub headers: HeadersMap,
-    pub keep_alive: bool,
-    pub redirect: RequestRedirect,
-    pub redirect_count: u32,
-    pub body: RequestBody,
-}
-
-// Implement TryClone for FetchRequest
-impl TryClone for FetchRequest {
-    fn try_clone(&self) -> Option<Self> {
-        Some(FetchRequest {
-            method: self.method.clone(),
-            uri: self.uri.clone(),
-            headers: self.headers.clone(),
-            keep_alive: self.keep_alive,
-            redirect: self.redirect,
-            redirect_count: self.redirect_count,
-            body: self.body.try_clone()?, // Fails if body cannot be cloned
-        })
-    }
-}
-
-#[derive(Debug)]
-pub struct FetchRequestBuilder {
-    method: Option<String>,
-    uri: Option<Uri>,
-    headers: Option<HeadersMap>,
-    keep_alive: Option<bool>,
-    redirect: Option<RequestRedirect>,
-    redirect_count: Option<u32>,
-    body: Option<RequestBody>,
-}
-
-impl FetchRequestBuilder {
-    pub fn new() -> Self {
-        FetchRequestBuilder {
-            method: None,
-            uri: None,
-            headers: Some(HeadersMap::default()),
-            keep_alive: Some(true),
-            redirect: Some(RequestRedirect::Follow),
-            redirect_count: Some(0),
-            body: None,
-        }
-    }
-
-    pub fn method(mut self, method: impl Into<String>) -> Self {
-        self.method = Some(method.into());
-        self
-    }
-
-    pub fn uri(mut self, uri: impl Into<Uri>) -> Self {
-        self.uri = Some(uri.into());
-        self
-    }
-
-    pub fn headers(mut self, headers: HeadersMap) -> Self {
-        self.headers = Some(headers);
-        self
-    }
-
-    pub fn keep_alive(mut self, keep_alive: bool) -> Self {
-        self.keep_alive = Some(keep_alive);
-        self
-    }
-
-    pub fn redirect(mut self, redirect: RequestRedirect) -> Self {
-        self.redirect = Some(redirect);
-        self
-    }
-
-    pub fn body(mut self, body: RequestBody) -> Self {
-        self.body = Some(body);
-        self
-    }
-
-    pub fn build(self) -> Result<FetchRequest, &'static str> {
-        Ok(FetchRequest {
-            method: self.method.ok_or("Method is required")?,
-            uri: self.uri.ok_or("URI is required")?,
-            headers: self.headers.unwrap_or_default(),
-            keep_alive: self.keep_alive.unwrap_or(true),
-            redirect: self.redirect.unwrap_or(RequestRedirect::Follow),
-            redirect_count: self.redirect_count.unwrap_or(20),
-            body: self.body.unwrap_or(RequestBody::None),
-        })
-    }
-}
-
-impl TryInto<RequestBody> for JSObject {
-    type Error = JSError;
-
-    fn try_into(self) -> Result<RequestBody, Self::Error> {
-        if self.has_property("source") {
-            let source = self.get_property("source")?.as_object()?;
+    fn from_object(obj: &JSObject) -> Result<RequestBody, JSError> {
+        if obj.has_property("source") {
+            let source = obj.get_property("source")?.as_object()?;
             let buffer = JSTypedArray::from(source);
             Ok(RequestBody::Bytes(Bytes::from(buffer.as_vec()?)))
-        } else if self.has_property("stream") {
+        } else if obj.has_property("stream") {
             let stream = downcast_ref::<BoundedBufferChannel<Vec<u8>>>(
-                &self.get_property("stream")?.as_object()?,
+                &obj.get_property("stream")?.as_object()?,
             );
             Ok(stream
                 .map(|mut s| {
@@ -249,45 +115,43 @@ impl TryInto<RequestBody> for JSObject {
     }
 }
 
-impl FetchRequest {
-    pub fn from_value(value: &JSValue, ctx: &JSContext) -> JSResult<Self> {
-        if !value.is_object() {
-            return Err(JSError::new_typ(&ctx, "Missing highWaterMark argument")?);
-        }
-
-        let request = value.as_object()?;
-        let method = request.get_property("method")?.as_string()?.to_string();
-        let url = request.get_property("url")?.as_string()?.to_string();
-        let redirect = request
-            .get_property("redirect")
-            .and_then(|v| Ok(RequestRedirect::from(v.as_number()? as u8)))
-            .unwrap_or(RequestRedirect::Follow);
-        let keep_alive = request
-            .get_property("keep_alive")
-            .and_then(|v| Ok(v.as_boolean()))
-            .unwrap_or(false);
-        let uri = url
-            .parse::<hyper::Uri>()
-            .map_err(|_| JSError::new_typ(&ctx, "Invalid URL").unwrap())?;
-        let header_list = request.get_property("header_list")?.as_object()?;
-        if !header_list.is_array() {
-            return Err(JSError::new_typ(&ctx, "header_list must be an array")?);
-        }
-
-        let headers = HeadersMap::try_from(JSArray::new(header_list))?;
-        let body = request.try_into()?;
-        let request = FetchRequestBuilder::new()
-            .method(method)
-            .uri(uri)
-            .headers(headers)
-            .keep_alive(keep_alive)
-            .redirect(redirect)
-            .body(body)
-            .build()
-            .map_err(|e| JSError::new_typ(&ctx, e).unwrap())?;
-
-        Ok(request)
+fn fetch_request_from_value(value: &JSValue, ctx: &JSContext) -> JSResult<FetchRequest> {
+    if !value.is_object() {
+        return Err(JSError::new_typ(&ctx, "Missing highWaterMark argument")?);
     }
+
+    let request = value.as_object()?;
+    let method = request.get_property("method")?.as_string()?.to_string();
+    let url = request.get_property("url")?.as_string()?.to_string();
+    let redirect = request
+        .get_property("redirect")
+        .and_then(|v| Ok(RequestRedirect::from(v.as_number()? as u8)))
+        .unwrap_or(RequestRedirect::Follow);
+    let keep_alive = request
+        .get_property("keep_alive")
+        .and_then(|v| Ok(v.as_boolean()))
+        .unwrap_or(false);
+    let uri = url
+        .parse::<hyper::Uri>()
+        .map_err(|_| JSError::new_typ(&ctx, "Invalid URL").unwrap())?;
+    let header_list = request.get_property("header_list")?.as_object()?;
+    if !header_list.is_array() {
+        return Err(JSError::new_typ(&ctx, "header_list must be an array")?);
+    }
+
+    let headers = HeadersMap::from_array(JSArray::new(header_list))?;
+    let body = RequestBody::from_object(&request)?;
+    let request = FetchRequestBuilder::new()
+        .method(method)
+        .uri(uri)
+        .headers(headers)
+        .keep_alive(keep_alive)
+        .redirect(redirect)
+        .body(body)
+        .build()
+        .map_err(|e| JSError::new_typ(&ctx, e).unwrap())?;
+
+    Ok(request)
 }
 
 #[js_class(
@@ -341,7 +205,7 @@ fn op_http_request_headers(
 ) -> JSResult<JSValue> {
     let client = downcast_ref::<FetchRequest>(&request);
     let headers = match client {
-        Some(client) => client.headers.to_value(&ctx)?,
+        Some(client) => client.headers.into_value(&ctx)?,
         None => return Err(JSError::new_typ(&ctx, "[Op:Headers] Invalid request")?),
     };
 
@@ -414,12 +278,8 @@ fn op_http_request_body(
         None => return Err(JSError::new_typ(&ctx, "[Op:Body] Invalid request")?),
     };
 
-    let is_stream = client.body.is_stream();
     if let Some(object) = client.body.take().to_object(&ctx)? {
-        let body = JSObject::new(&ctx);
-        let name = if is_stream { "stream" } else { "source" };
-        body.set_property(name, &object, Default::default())?;
-        return Ok(body.into());
+        return Ok(object.into());
     }
 
     Ok(JSValue::null(&ctx))
@@ -442,192 +302,4 @@ define_exports!(
 );
 
 #[cfg(test)]
-mod tests {
-    use futures::StreamExt;
-
-    use super::*;
-    // use crate::tests::test_utils::new_runtime;
-
-    // #[test]
-    // fn test_request_initialization() {
-    //     let rt = new_runtime();
-    //     let result = rt.evaluate_script(
-    //         r#"
-    //         const request_params = {
-    //             method: 'GET',
-    //             url: 'https://example.com',
-    //             header_list: [['Content-Type', 'application/json']]
-    //         };
-    //         request_params
-    //     "#,
-    //         None,
-    //     );
-
-    //     assert!(result.is_ok());
-    //     let result = result.unwrap();
-    //     let request = FetchRequest::from_value(&result, rt.context()).unwrap();
-    //     assert_eq!(request.method, "GET");
-    //     assert_eq!(request.uri.to_string(), "https://example.com/");
-    //     assert_eq!(
-    //         request.headers.get("Content-Type").unwrap(),
-    //         "application/json"
-    //     );
-    //     assert_eq!(request.body.is_none(), true);
-    // }
-
-    // #[test]
-    // fn test_request_initialization_with_body() {
-    //     let rt = new_runtime();
-    //     let result = rt.evaluate_script(
-    //         r#"
-    //         const request_params = {
-    //             method: 'POST',
-    //             url: 'https://example.com',
-    //             header_list: [['Content-Type', 'application/json']],
-    //             source: new Uint8Array([1, 2, 3, 4])
-    //         };
-    //         request_params
-    //     "#,
-    //         None,
-    //     );
-
-    //     assert!(result.is_ok());
-    //     let result = result.unwrap();
-    //     let request = FetchRequest::from_value(&result, rt.context()).unwrap();
-    //     assert_eq!(request.method, "POST");
-    //     assert_eq!(request.uri.to_string(), "https://example.com/");
-    //     assert_eq!(
-    //         request.headers.get("Content-Type").unwrap(),
-    //         "application/json"
-    //     );
-    //     assert_eq!(request.body.is_bytes(), true);
-    //     assert_eq!(request.body.is_stream(), false);
-
-    //     let buffer = match request.body {
-    //         RequestBody::Bytes(buffer) => buffer,
-    //         _ => panic!("Expected a buffer"),
-    //     };
-    //     assert_eq!(buffer, Bytes::from(vec![1, 2, 3, 4]));
-    // }
-
-    #[test]
-    fn test_fetch_builder() {
-        let request = FetchRequestBuilder::new()
-            .method("GET")
-            .uri(Uri::from_static("https://example.com"))
-            .headers(HeadersMap::new(vec![(
-                "Content-Type".to_string(),
-                "application/json".to_string(),
-            )]))
-            .body(RequestBody::None)
-            .build()
-            .unwrap();
-
-        assert_eq!(request.method, "GET");
-        assert_eq!(request.uri.to_string(), "https://example.com/");
-        assert_eq!(
-            request.headers.get("Content-Type").unwrap(),
-            "application/json"
-        );
-        assert_eq!(request.body.is_none(), true);
-    }
-
-    #[test]
-    fn test_fetch_builder_with_body() {
-        let request = FetchRequestBuilder::new()
-            .method("POST")
-            .uri(Uri::from_static("https://example.com"))
-            .headers(HeadersMap::new(vec![(
-                "Content-Type".to_string(),
-                "application/json".to_string(),
-            )]))
-            .body(RequestBody::Bytes(Bytes::from(vec![1, 2, 3, 4])))
-            .build()
-            .unwrap();
-
-        assert_eq!(request.method, "POST");
-        assert_eq!(request.uri.to_string(), "https://example.com/");
-        assert_eq!(
-            request.headers.get("Content-Type").unwrap(),
-            "application/json"
-        );
-        assert_eq!(request.body.is_bytes(), true);
-        assert_eq!(request.body.is_stream(), false);
-
-        let buffer = match request.body {
-            RequestBody::Bytes(buffer) => buffer,
-            _ => panic!("Expected a buffer"),
-        };
-        assert_eq!(buffer, Bytes::from(vec![1, 2, 3, 4]));
-    }
-
-    #[tokio::test]
-    async fn test_fetch_builder_with_stream() {
-        let mut internal_stream = BoundedBufferChannel::new(10);
-        internal_stream.try_write(vec![1, 2, 3, 4]).unwrap();
-
-        let request = FetchRequestBuilder::new()
-            .method("POST")
-            .uri(Uri::from_static("https://example.com"))
-            .headers(HeadersMap::new(vec![(
-                "Content-Type".to_string(),
-                "application/json".to_string(),
-            )]))
-            .body(RequestBody::Stream(
-                internal_stream
-                    .aquire_reader()
-                    .map(StreamDecoder::internal_stream),
-            ))
-            .build()
-            .unwrap();
-
-        assert_eq!(request.method, "POST");
-        assert_eq!(request.uri.to_string(), "https://example.com/");
-        assert_eq!(
-            request.headers.get("Content-Type").unwrap(),
-            "application/json"
-        );
-        assert_eq!(request.body.is_bytes(), false);
-        assert_eq!(request.body.is_stream(), true);
-
-        assert!(request.body.try_clone().is_none());
-
-        let mut stream = match request.body {
-            RequestBody::Stream(Some(stream)) => stream,
-            _ => panic!("Expected a stream"),
-        };
-
-        let buffer = stream.next().await.unwrap().unwrap();
-        assert_eq!(buffer, vec![1, 2, 3, 4]);
-    }
-
-    #[test]
-    fn test_request_try_clone() {
-        let request = FetchRequestBuilder::new()
-            .method("POST")
-            .uri(Uri::from_static("https://example.com"))
-            .headers(HeadersMap::new(vec![(
-                "Content-Type".to_string(),
-                "application/json".to_string(),
-            )]))
-            .body(RequestBody::Bytes(Bytes::from(vec![1, 2, 3, 4])))
-            .build()
-            .unwrap();
-
-        let cloned_request = request.try_clone().unwrap();
-        assert_eq!(cloned_request.method, "POST");
-        assert_eq!(cloned_request.uri.to_string(), "https://example.com/");
-        assert_eq!(
-            cloned_request.headers.get("Content-Type").unwrap(),
-            "application/json"
-        );
-        assert_eq!(cloned_request.body.is_bytes(), true);
-        assert_eq!(cloned_request.body.is_stream(), false);
-
-        let buffer = match cloned_request.body {
-            RequestBody::Bytes(buffer) => buffer,
-            _ => panic!("Expected a buffer"),
-        };
-        assert_eq!(buffer, Bytes::from(vec![1, 2, 3, 4]));
-    }
-}
+mod tests {}

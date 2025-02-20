@@ -1,4 +1,4 @@
-use crate::http::{body::HttpBody, decoder::encoder::StreamEncoder};
+use crate::http::body::HttpBody;
 use futures::{channel::oneshot, FutureExt as _, Stream};
 use hyper::{body::Incoming, service::Service, Request, Response};
 use std::{borrow::BorrowMut, future::Future, net::ToSocketAddrs, pin::Pin, sync::Arc};
@@ -15,7 +15,7 @@ use tokio_rustls::rustls::{
     ServerConfig,
 };
 
-pub type RequestEventSender = oneshot::Sender<Response<HttpBody<StreamEncoder>>>;
+pub type RequestEventSender = oneshot::Sender<Response<HttpBody>>;
 /// A request event to be processed by the server.
 /// The server will send a response back to the client using the `sender`.
 /// The `req` field contains the incoming request.
@@ -35,7 +35,7 @@ impl RequestEvent {
         }
     }
 
-    pub fn response(self, res: Response<HttpBody<StreamEncoder>>) {
+    pub fn response(self, res: Response<HttpBody>) {
         if let Some(sender) = self.sender {
             let _ = sender.send(res);
         }
@@ -135,13 +135,13 @@ pub enum ServiceError {
 }
 
 impl Service<Request<Incoming>> for HttpService {
-    type Response = Response<HttpBody<StreamEncoder>>;
+    type Response = Response<HttpBody>;
     type Error = ServiceError;
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn call(&self, req: Request<Incoming>) -> Self::Future {
-        let (sender, receiver) = oneshot::channel::<Response<HttpBody<StreamEncoder>>>();
+        let (sender, receiver) = oneshot::channel::<Response<HttpBody>>();
 
         let send_result = self
             .sender
@@ -266,11 +266,6 @@ impl HttpServer {
 
         self.tls_config = Some(Arc::new(config));
         Ok(self)
-    }
-
-    pub fn acceptor(mut self, acceptor: tokio_rustls::TlsAcceptor) -> Self {
-        self.acceptor = Some(acceptor);
-        self
     }
 
     async fn accept_https_connection(
@@ -507,12 +502,12 @@ mod tests {
     use bytes::Bytes;
     use futures::stream::TryStreamExt;
     use futures::StreamExt;
-    use http_body_util::{BodyExt, Either, Full};
+    use http_body_util::{BodyExt, Full};
     use hyper::Uri;
     use tokio_rustls::rustls::pki_types::pem::PemObject;
 
     use crate::http::{
-        fetch::fetch::FetchClient,
+        fetch::FetchClient,
         headers::HeadersMap,
         request::{FetchRequest, FetchRequestBuilder, RequestBody},
         response::ResponseBody,
@@ -586,10 +581,12 @@ mod tests {
         .unwrap();
     }
 
-    fn handle_request(_: Request<Incoming>) -> Response<HttpBody<StreamEncoder>> {
-        Response::new(Either::Right(
-            Full::from(Bytes::from_static(b"Hello")).boxed(),
-        ))
+    fn handle_request(_: Request<Incoming>) -> Response<HttpBody> {
+        Response::new(
+            Full::from(Bytes::from_static(b"Hello"))
+                .map_err(|_| crate::FetchError::new("Failed to create response"))
+                .boxed(),
+        )
     }
 
     fn load_certs(path: &str) -> Vec<CertificateDer<'static>> {
@@ -631,7 +628,7 @@ mod tests {
 
     async fn create_https_server(addr: SocketAddr) -> HttpServer {
         let path_tls_folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests")
+            .join("../../tests")
             .join("fixtures")
             .join("tls");
         let pem_file = path_tls_folder.join("selfsigned.crt");

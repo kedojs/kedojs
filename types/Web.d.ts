@@ -81,7 +81,7 @@ declare type TextDecodeInput = ArrayBufferView | ArrayBuffer | DataView;
 declare type RequestInfo = import("@kedo:int/std/web").Request | string;
 declare type ResponseTainting = "basic" | "cors" | "opaque";
 declare type ResponseType = "basic" | "cors" | "default" | "error" | "opaque" | "opaqueredirect";
-declare type BodyInit = Blob | BufferSource | FormData | import("@kedo:int/std/web").URLSearchParams | ArrayBufferLike | ArrayBufferView | import("@kedo/stream").ReadableStream | string;
+declare type BodyInit = import("@kedo:int/std/web").URLSearchParams | ArrayBuffer | ArrayBufferView | import("@kedo/stream").ReadableStream | string;
 
 declare type ServeOptions = {
     hostname?: string;

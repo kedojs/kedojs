@@ -70,12 +70,12 @@ pub fn op_close_stream_resource(
     resource: JSObject,
 ) -> JSResult<JSValue> {
     let internal_stream = downcast_ref::<BoundedBufferChannel<Vec<u8>>>(&resource);
-    let mut stream = match internal_stream {
+    let mut channel = match internal_stream {
         Some(stream) => stream,
         None => return Ok(JSValue::undefined(&ctx)),
     };
 
-    stream.close();
+    channel.close();
     Ok(JSValue::undefined(&ctx))
 }
 
@@ -209,18 +209,25 @@ fn op_write_sync_readable_stream(
     chunk: JSObject,
 ) -> JSResult<JSValue> {
     let resource = downcast_ref::<BoundedBufferChannel<Vec<u8>>>(&resource);
-    let stream_resource = match resource {
+    let channel = match resource {
         Some(stream) => stream,
         None => return Err(js_error_typ!(&ctx, "[Op:WriteSync] Invalid stream")),
     };
 
-    let typed_array = JSTypedArray::from_value(&chunk)?;
+    let typed_array = JSTypedArray::from(chunk);
     let bytes = typed_array.as_vec::<u8>()?;
     let len = bytes.len() as f64;
 
-    match stream_resource.try_write(bytes) {
+    match channel.try_write(bytes) {
         Ok(_) => Ok(JSValue::number(&ctx, len).into()),
-        Err(e) => Err(js_error_typ!(&ctx, e.to_string())),
+        Err(e) => {
+            // if stream is closed return -1 otherwise return -2 if the buffer is full
+            match e {
+                StreamError::Closed => Ok(JSValue::number(&ctx, -1 as f64).into()),
+                StreamError::ChannelFull => Ok(JSValue::number(&ctx, -2 as f64).into()),
+                _ => Err(js_error_typ!(&ctx, format!("{}", e))),
+            }
+        }
     }
 }
 

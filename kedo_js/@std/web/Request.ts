@@ -379,14 +379,14 @@ class InnerRequestResource {
     get body(): Uint8Array | ExtractedBody | null {
         if (this.#body === undefined) {
             const requestBody = op_http_request_body(this.requestResource);
-            if (requestBody?.source) {
-                this.#body = requestBody.source;
-            } else if (requestBody?.stream) {
-                const stream = decodedStreamToReadableStream(requestBody.stream);
+            if (requestBody instanceof Uint8Array) {
+                this.#body = requestBody;
+            } else if (requestBody == null) {
+                this.#body = null;
+            } else {
+                const stream = decodedStreamToReadableStream(requestBody);
                 const bodyWithType = extractBody(stream, this.keepalive);
                 this.#body = bodyWithType.body;
-            } else {
-                this.#body = null;
             }
         }
 

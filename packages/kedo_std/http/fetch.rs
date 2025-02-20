@@ -1,10 +1,10 @@
 use super::errors::FetchError;
 use crate::http::body::IncomingBodyStream;
-use crate::http::decoder::decoder::StreamDecoder;
+use crate::http::decoder::StreamDecoder;
 use crate::http::headers::HeadersMap;
 use crate::http::request::{FetchRequest, RequestBody, RequestRedirect};
 use crate::http::response::{FetchResponse, ResponseBody};
-use crate::http::util::{basic_auth, extract_authority, remove_credentials};
+use crate::http::utils::{basic_auth, extract_authority, remove_credentials};
 use futures::ready;
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Either, Empty, Full};
@@ -291,11 +291,11 @@ mod tests {
     use crate::http::request::FetchRequestBuilder;
     use crate::http::request::{RequestBody, RequestRedirect};
     use crate::http::tests::test_utils::start_test_server;
+    use crate::BoundedBufferChannel;
     use bytes::Bytes;
     use futures::stream::StreamExt;
     use futures::TryStreamExt;
     use hyper::{body, Response};
-    use kedo_std::BoundedBufferChannel;
 
     fn build_redirect_response(
         location: &str,

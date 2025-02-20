@@ -54,7 +54,6 @@ enum Commands {
 
 fn create_tokio_runtime() -> tokio::runtime::Runtime {
     tokio::runtime::Builder::new_multi_thread()
-        // .worker_threads(4)
         .enable_io()
         .enable_time()
         .event_interval(31)

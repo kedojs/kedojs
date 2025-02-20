@@ -1,41 +1,10 @@
-use super::fetch::errors::FetchError;
+use crate::http::errors::FetchError;
+use crate::BoundedBufferChannelReader;
 use bytes::Bytes;
 use futures::Stream;
-use http_body_util::{combinators::BoxBody, Either};
+use http_body_util::combinators::BoxBody;
 use hyper::body::{Body, Incoming};
-use kedo_std::BoundedBufferChannelReader;
-use std::{convert::Infallible, pin::Pin};
-
-#[derive(Debug)]
-pub struct HtppBodyStream<S>
-where
-    S: Stream<Item = Result<Bytes, FetchError>> + Unpin,
-{
-    inner: S,
-}
-
-impl<S> HtppBodyStream<S>
-where
-    S: Stream<Item = Result<Bytes, FetchError>> + Unpin,
-{
-    pub fn new(stream: S) -> Self {
-        Self { inner: stream }
-    }
-}
-
-impl<S> Stream for HtppBodyStream<S>
-where
-    S: Stream<Item = Result<Bytes, FetchError>> + Unpin,
-{
-    type Item = Result<Bytes, FetchError>;
-
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        std::pin::Pin::new(&mut self.inner).poll_next(cx)
-    }
-}
+use std::pin::Pin;
 
 #[derive(Debug)]
 pub struct IncomingBodyStream(Incoming);
@@ -90,16 +59,13 @@ impl Stream for InternalBodyStream {
 
         loop {
             break match Pin::new(&mut this.0).poll_next(cx) {
-                std::task::Poll::Ready(Some(Ok(chunk))) => {
+                std::task::Poll::Ready(Some(chunk)) => {
                     if !chunk.is_empty() {
                         let data = Bytes::from(chunk);
                         break std::task::Poll::Ready(Some(Ok(data)));
                     }
 
                     continue;
-                }
-                std::task::Poll::Ready(Some(Err(e))) => {
-                    std::task::Poll::Ready(Some(Err(FetchError::from(e))))
                 }
                 std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
                 std::task::Poll::Pending => std::task::Poll::Pending,
@@ -108,7 +74,7 @@ impl Stream for InternalBodyStream {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (0, None)
+        self.0.size_hint()
     }
 }
 
@@ -118,4 +84,4 @@ impl InternalBodyStream {
     }
 }
 
-pub type HttpBody<T> = Either<T, BoxBody<bytes::Bytes, Infallible>>;
+pub type HttpBody = BoxBody<bytes::Bytes, FetchError>;

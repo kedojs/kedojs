@@ -8,7 +8,6 @@ import { Event, EventTarget } from "@kedo/events";
 import { assert } from "@kedo/utils";
 import { queue_internal_timeout } from "@kedo:op/web";
 
-
 const _abortReason = Symbol("[abortReason]");
 const _abortAlgorithms = Symbol("[abortAlgorithms]");
 const _dependent = Symbol("[dependent]");
@@ -204,5 +203,9 @@ class AbortController {
   }
 }
 
-export { AbortController, AbortSignal, createDependentAbortSignal, newAbortSignal };
-
+export {
+  AbortController,
+  AbortSignal,
+  createDependentAbortSignal,
+  newAbortSignal,
+};

@@ -1,21 +1,15 @@
-use super::server::{
-    HttpServerBuilder, HttpSocketAddr, RequestEvent, RequestEventSender, RequestReceiver,
-    ServerHandle,
-};
 use crate::{
-    http::{
-        body::IncomingBodyStream,
-        decoder::decoder::StreamDecoder,
-        fetch::errors::FetchError,
-        headers::HeadersMap,
-        request::{FetchRequest, FetchRequestBuilder, FetchRequestResource, RequestBody},
-        response::FetchResponse,
-    },
+    http::{request::FetchRequestExt, response::FetchResponseExt},
     signals::{InternalSignal, OneshotSignal},
+    FetchRequestResource,
 };
 use futures::Stream;
 use kedo_core::{
     downcast_state, enqueue_job, native_job, AsyncJobQueueInner, ClassTable, NativeJob,
+};
+use kedo_std::{
+    FetchRequest, FetchResponse, HttpServerBuilder, HttpSocketAddr, RequestEvent,
+    RequestEventSender, RequestReceiver, ServerHandle,
 };
 use kedo_utils::{downcast_ref, js_error, js_error_typ, js_undefined};
 use rust_jsc::{
@@ -85,44 +79,6 @@ impl ServerOptions {
 
     fn address(&self) -> SocketAddr {
         self.address
-    }
-}
-
-impl TryFrom<RequestEvent> for FetchRequest {
-    type Error = FetchError;
-
-    fn try_from(value: RequestEvent) -> Result<Self, Self::Error> {
-        let mut headers = HeadersMap::default();
-        for (name, value) in value.req.headers() {
-            let value_str = value.to_str();
-            if let Ok(value_str) = value_str {
-                headers.append(name.as_str(), value_str);
-            }
-        }
-
-        // check keep alive from headers
-        let keep_alive = headers
-            .get("connection")
-            .map(|value| value.to_lowercase() == "keep-alive")
-            .unwrap_or(false);
-
-        let method = value.req.method().as_str().to_string();
-        let uri = value.req.uri().clone();
-        let body_stream = IncomingBodyStream::new(value.req.into_body());
-        let decoded_body = StreamDecoder::detect(body_stream, &headers);
-
-        let request = FetchRequestBuilder::new()
-            .method(method)
-            .uri(uri)
-            .headers(headers)
-            .keep_alive(keep_alive)
-            .body(RequestBody::Stream(Some(decoded_body)))
-            .build()
-            .map_err(|e| FetchError {
-                message: "Failed to build fetch request".into(),
-                inner: Some(e.into()),
-            })?;
-        Ok(request)
     }
 }
 
@@ -212,7 +168,7 @@ impl HttpAccepter {
     fn process_request(mut event: RequestEvent, function: JSObject) -> NativeJob {
         // TODO: close the connection on error
         let sender = event.sender.take().expect("Failed to take sender");
-        let request = FetchRequest::try_from(event).expect("Failed to convert request");
+        let request = FetchRequest::from_event(event).expect("Failed to convert request");
 
         NativeJob::new(move |ctx| {
             let state = downcast_state(&ctx);
@@ -445,8 +401,8 @@ impl RequestEventResource {
     /// finalize is called when the object is being garbage collected.
     /// This is the place to clean up any resources that the object may hold.
     #[finalize]
-    fn finalize(data_ptr: PrivateData) {
-        // drop_ptr::<RequestEventSender>(data_ptr);
+    fn finalize(_: PrivateData) {
+        // Any necessary cleanup can be implemented here
     }
 
     #[constructor]
@@ -475,8 +431,6 @@ fn op_send_event_response(
     sender: JSObject,
     response: JSObject,
 ) -> JSResult<JSValue> {
-    sender.protect();
-    response.protect();
     let fetch_response = FetchResponse::from_object(&ctx, &response)?;
     let http_response = match fetch_response.try_into() {
         Ok(response) => response,
@@ -494,8 +448,6 @@ fn op_send_event_response(
     };
 
     let _ = http_sender.send(http_response);
-    response.unprotect();
-    sender.unprotect();
     Ok(JSValue::undefined(&ctx))
 }
 

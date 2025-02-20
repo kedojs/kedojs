@@ -1,11 +1,9 @@
-use crate::http::decoder::resource::op_read_decoded_stream;
-use crate::http::fetch::fetch::FetchClient;
-use crate::{
-    http::{fetch::errors::FetchError, request::FetchRequest},
-    signals::InternalSignal,
-};
+use crate::http::response::FetchResponseExt;
+use crate::stream_codec::op_read_decoded_stream;
+use crate::{http::request::FetchRequestExt, signals::InternalSignal};
 use kedo_core::{define_exports, downcast_state, enqueue_job, native_job};
 use kedo_macros::js_class;
+use kedo_std::{FetchClient, FetchError, FetchRequest};
 use kedo_utils::{downcast_ref, js_error, js_undefined};
 use rust_jsc::{callback, JSContext, JSError, JSObject, JSResult, JSValue};
 

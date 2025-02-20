@@ -15,3 +15,6 @@ tests/manual/*.txt
 .idea/
 log.txt
 logs.txt
+flamegraph.svg
+.flamegraph/*.svg
+cargo-flamegraph.stacks

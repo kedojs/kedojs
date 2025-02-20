@@ -1,6 +1,5 @@
 use futures::Stream;
 use std::cell::RefCell;
-use std::convert::Infallible;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -110,6 +109,7 @@ impl Future for StreamCompletion {
 ///
 /// let channel: BoundedBufferChannel<i32> = BoundedBufferChannel::new(100);
 /// ```
+/// TODO: use buffer size to implement backpressure
 pub struct BoundedBufferChannel<T> {
     sender: Option<tokio::sync::mpsc::Sender<T>>,
     receiver: Option<tokio::sync::mpsc::Receiver<T>>,
@@ -281,7 +281,6 @@ impl<T> BoundedBufferChannel<T> {
     }
 
     pub fn close(&mut self) {
-        let _ = self.receiver.take();
         let _ = self.sender.take();
         self.completion.close();
     }
@@ -332,6 +331,13 @@ impl<T> BoundedBufferChannelWriter<T> {
             .send(item)
             .await
             .map_err(|_| StreamError::Closed)
+    }
+
+    pub fn try_write(&self, item: T) -> Result<(), StreamError> {
+        self.sender.try_send(item).map_err(|e| match e {
+            tokio::sync::mpsc::error::TrySendError::Full(_) => StreamError::ChannelFull,
+            tokio::sync::mpsc::error::TrySendError::Closed(_) => StreamError::Closed,
+        })
     }
 }
 
@@ -406,21 +412,15 @@ impl<T> BoundedBufferChannelReader<T> {
 }
 
 impl<T> Stream for BoundedBufferChannelReader<T> {
-    type Item = Result<T, Infallible>;
+    type Item = T;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // Safety: We're not moving the struct; we're only accessing its fields.
-        let self_mut = unsafe { self.get_unchecked_mut() };
+        let self_mut = self.get_mut();
 
         // Pin the receiver since `poll_recv` requires a `Pin<&mut Receiver<T>>`.
         let mut receiver = Pin::new(&mut self_mut.receiver);
-
-        // Poll the receiver for the next item.
-        match receiver.poll_recv(cx) {
-            Poll::Ready(Some(item)) => Poll::Ready(Some(Ok(item))),
-            Poll::Ready(None) => Poll::Ready(None),
-            Poll::Pending => Poll::Pending,
-        }
+        receiver.poll_recv(cx)
     }
 }
 

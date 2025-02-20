@@ -1,7 +1,7 @@
 use crate::{
     encoding::text_encoding::TextEncodingModule,
     http::{
-        fetch::lib::FetchModule, request::FetchRequestOps, server::lib::server_exports,
+        fetch::FetchModule, request::FetchRequestOps, server::server_exports,
         url_module::UrlModule,
     },
     signals::signal_exports,
@@ -18,9 +18,8 @@ pub fn is_array_buffer_detached(
     ctx: JSContext,
     _: JSObject,
     _this: JSObject,
-    args: &[JSValue],
+    object: JSObject,
 ) -> JSResult<JSValue> {
-    let object = args[0].as_object().unwrap();
     let array_buffer = JSArrayBuffer::from_object(object);
     Ok(JSValue::boolean(&ctx, array_buffer.is_detached()))
 }

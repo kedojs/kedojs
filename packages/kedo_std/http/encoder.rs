@@ -1,5 +1,5 @@
 use crate::http::body::InternalBodyStream;
-use crate::http::fetch::errors::FetchError;
+use crate::http::errors::FetchError;
 use crate::http::headers::HeadersMap;
 use async_compression::tokio::bufread::BrotliEncoder;
 use async_compression::tokio::bufread::GzipEncoder;
@@ -8,8 +8,6 @@ use async_compression::tokio::bufread::ZstdEncoder;
 use bytes::Bytes;
 use futures::ready;
 use futures::Stream;
-use hyper::body::Body;
-use hyper::body::SizeHint;
 use hyper::header::ACCEPT_ENCODING;
 use std::pin::Pin;
 use tokio_util::codec::{BytesCodec, FramedRead};
@@ -138,42 +136,6 @@ impl StreamEncoder {
         best_encoding
     }
 
-    // fn detect_encoding(headers: &HeadersMap) -> Option<EncoderType> {
-    //     let accept_encodings = headers.get_all(ACCEPT_ENCODING.as_str());
-
-    //     if accept_encodings.is_empty() {
-    //         return None;
-    //     }
-
-    //     let mut encodings = Vec::new();
-
-    //     for accept_encoding in accept_encodings.iter() {
-    //         for encoding_str in accept_encoding.split(',') {
-    //             let parts: Vec<&str> = encoding_str.trim().split(";q=").collect();
-    //             let encoding = parts[0].trim();
-    //             let q = if parts.len() > 1 {
-    //                 parts[1].parse::<f32>().unwrap_or(1.0)
-    //             } else {
-    //                 1.0
-    //             };
-    //             encodings.push((encoding, q));
-    //         }
-    //     }
-
-    //     encodings.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
-
-    //     for (encoding, _) in encodings {
-    //         println!("Encoding: {}", encoding);
-    //         if let Ok(encoder_type) = EncoderType::try_from(encoding) {
-    //             return Some(encoder_type);
-    //         } else if encoding == "*" {
-    //             return Some(EncoderType::Gzip);
-    //         }
-    //     }
-
-    //     None
-    // }
-
     pub fn detect(stream: InternalBodyStream, headers: &HeadersMap) -> Self {
         match Self::detect_encoding(headers) {
             Some(EncoderType::Gzip) => Self::gzip(stream),
@@ -197,83 +159,13 @@ enum Inner {
 }
 
 impl Stream for StreamEncoder {
-    type Item = Result<Bytes, FetchError>;
+    type Item = Result<hyper::body::Frame<Bytes>, FetchError>;
 
     fn poll_next(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
         let this = std::pin::Pin::into_inner(self);
-
-        loop {
-            break match this.inner {
-                Inner::Gzip(ref mut decoder) => {
-                    match ready!(Pin::new(decoder).poll_next(cx)) {
-                        Some(Ok(chunk)) => {
-                            std::task::Poll::Ready(Some(Ok(chunk.freeze())))
-                        }
-                        Some(Err(e)) => {
-                            std::task::Poll::Ready(Some(Err(FetchError::from(e))))
-                        }
-                        None => std::task::Poll::Ready(None),
-                    }
-                }
-                Inner::Brotli(ref mut decoder) => {
-                    match ready!(Pin::new(decoder).poll_next(cx)) {
-                        Some(Ok(chunk)) => {
-                            std::task::Poll::Ready(Some(Ok(chunk.freeze())))
-                        }
-                        Some(Err(e)) => {
-                            std::task::Poll::Ready(Some(Err(FetchError::from(e))))
-                        }
-                        None => std::task::Poll::Ready(None),
-                    }
-                }
-                Inner::Zstd(ref mut decoder) => {
-                    match ready!(Pin::new(decoder).poll_next(cx)) {
-                        Some(Ok(chunk)) => {
-                            std::task::Poll::Ready(Some(Ok(chunk.freeze())))
-                        }
-                        Some(Err(e)) => {
-                            std::task::Poll::Ready(Some(Err(FetchError::from(e))))
-                        }
-                        None => std::task::Poll::Ready(None),
-                    }
-                }
-                Inner::Deflate(ref mut decoder) => {
-                    match ready!(Pin::new(decoder).poll_next(cx)) {
-                        Some(Ok(chunk)) => {
-                            std::task::Poll::Ready(Some(Ok(chunk.freeze())))
-                        }
-                        Some(Err(e)) => {
-                            std::task::Poll::Ready(Some(Err(FetchError::from(e))))
-                        }
-                        None => std::task::Poll::Ready(None),
-                    }
-                }
-                Inner::Plain(ref mut stream) => Pin::new(stream).poll_next(cx),
-            };
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        match &self.inner {
-            Inner::Plain(stream) => stream.size_hint(),
-            _ => Default::default(),
-        }
-    }
-}
-
-impl Body for StreamEncoder {
-    type Data = Bytes;
-    type Error = FetchError;
-
-    fn poll_frame(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Result<hyper::body::Frame<Self::Data>, Self::Error>>>
-    {
-        let this = Pin::into_inner(self);
 
         loop {
             break match this.inner {
@@ -336,10 +228,10 @@ impl Body for StreamEncoder {
         }
     }
 
-    fn size_hint(&self) -> SizeHint {
+    fn size_hint(&self) -> (usize, Option<usize>) {
         match &self.inner {
-            // Inner::Plain(stream) => stream.0.size_hint(),
-            _ => SizeHint::default(),
+            Inner::Plain(stream) => stream.size_hint(),
+            _ => Default::default(),
         }
     }
 }
@@ -347,9 +239,9 @@ impl Body for StreamEncoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::BoundedBufferChannel;
     use futures::StreamExt;
     use hyper::header::ACCEPT_ENCODING;
-    use kedo_std::BoundedBufferChannel;
 
     #[tokio::test]
     async fn test_stream_encoder_plain() {
@@ -369,10 +261,10 @@ mod tests {
         }
 
         assert_eq!(chunks.len(), 5);
-        let text = chunks
+        let text: Vec<Bytes> = chunks
             .iter()
-            .map(|c| c.as_ref().unwrap())
-            .collect::<Vec<_>>();
+            .map(|c| c.as_ref().unwrap().data_ref().unwrap().clone())
+            .collect::<Vec<Bytes>>();
         assert_eq!(
             text,
             vec![

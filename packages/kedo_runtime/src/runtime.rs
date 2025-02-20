@@ -1,11 +1,3 @@
-// use crate::{
-//     http::{
-//         fetch::lib::FetchClientResource, lib::DecodedStreamResource,
-//         server::lib::RequestEventResource,
-//     },
-//     modules::{self, text_decoder_inner::EncodingTextDecoder, url_record::UrlRecord},
-//     signals::InternalSignal,
-// };
 use futures::future::poll_fn;
 use kedo_console::Console;
 use kedo_core::{

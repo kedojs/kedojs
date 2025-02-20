@@ -3,7 +3,7 @@ const encoder = new TextEncoder();
 async function testServerListen() {
     // Test 1: Passing URLSearchParams as the body
     Deno.serve({
-        hostname: "localhost",
+        hostname: "0.0.0.0",
         port: 8000,
     },
         async (req) => {
@@ -16,15 +16,18 @@ async function testServerListen() {
                 },
                 async pull(controller) {
                     controller.enqueue(encoder.encode("Hello, World! 4\n"));
+                    // enqueue more data more then 64kb
+                    for (let i = 0; i < 160; i++) {
+                        controller.enqueue(encoder.encode(`Hello, World! ${i}\n`.repeat(5)));
+                    }
+
                     controller.close();
                 },
                 cancel() { },
             });
             // body.pipeThrough(new TextEncoderStream())
             let response = new Response(body, {
-                headers: {
-                    "content-type": "text/plain; charset=utf-8",
-                },
+                headers: { "Content-Type": "application/octet-stream" },
             });
             // response.text();
             return response;

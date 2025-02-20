@@ -4,6 +4,9 @@
 run:
 	(RUST_BACKTRACE=1 cargo run --manifest-path ./cli/Cargo.toml -- run $(file))
 
+flamegraph:
+	(RUSTFLAGS='-Cforce-frame-pointers=yes' cargo flamegraph --root --bin kedo -- run $(file))
+
 bundle:
 	(cargo run --manifest-path ./cli/Cargo.toml -- bundle --output=$(output) --entry=$(entry) --minify)
 
@@ -32,7 +35,7 @@ test-module:
 bench-server:
 	@for i in $$(seq 1 $(times)); do \
 		echo "Running benchmark test $$i of $(times)"; \
-		ab -n $(req) -c $(conc) -T 'application/json' 'http://localhost:$(port)/'; \
+		ab -n $(req) -c $(conc) -T 'application/json' 'http://0.0.0.0:$(port)/'; \
 	done
 
 ## run javascript file

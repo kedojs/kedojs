@@ -3,8 +3,8 @@ use std::{convert::Infallible, error::Error, fmt::Debug, io};
 pub(crate) type BoxError = Box<dyn Error + Send + Sync>;
 
 pub struct FetchError {
-    pub(crate) message: String,
-    pub(crate) inner: Option<BoxError>,
+    pub message: String,
+    pub inner: Option<BoxError>,
 }
 
 impl FetchError {

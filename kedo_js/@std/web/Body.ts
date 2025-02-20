@@ -2,6 +2,7 @@ import {
     isDisturbed,
     ReadableStream
 } from "@kedo:int/std/stream";
+import { TextEncoder } from "./TextDecoder";
 
 const isReadableStream = (object: any): object is ReadableStream =>
     object instanceof ReadableStream;
@@ -135,6 +136,10 @@ class InternalBody {
     // }
 }
 
+const encoder = new TextEncoder();
+
+type BodyInit = ArrayBuffer | ArrayBufferView | string | URLSearchParams | ReadableStream;
+
 // TODO: this implementation must be optimized
 function extractBody(
     object: BodyInit,
@@ -178,11 +183,11 @@ function extractBody(
         }
     } else if (object instanceof URLSearchParams) {
         // URLSearchParams
-        source = new TextEncoder().encode(object.toString());
+        source = encoder.encode(object.toString());
         type = "application/x-www-form-urlencoded;charset=UTF-8";
     } else if (typeof object === "string") {
         // Scalar value string
-        source = new TextEncoder().encode(object);
+        source = encoder.encode(object);
         type = "text/plain;charset=UTF-8";
     } else if (!isReadableStream(object)) {
         throw new TypeError("Invalid body type");

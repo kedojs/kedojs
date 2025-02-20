@@ -228,13 +228,8 @@ pub fn encoding_encode(
     ctx: JSContext,
     _: JSObject,
     _this: JSObject,
-    args: &[JSValue],
+    input: JSString,
 ) -> JSResult<JSValue> {
-    let input = match args.get(0) {
-        Some(arg) => arg.as_string()?,
-        None => return Err(JSError::new_typ(&ctx, "Missing Input argument")?),
-    };
-
     let mut bytes: ManuallyDrop<Vec<u8>> = ManuallyDrop::new(input.into());
     let output = JSTypedArray::with_bytes::<u8>(
         &ctx,

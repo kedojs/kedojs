@@ -1,4 +1,4 @@
-// import { ReadableStream } from "@kedo/stream";
+import { ReadableStream } from "@kedo/stream";
 
 const encoder = new TextEncoder();
 
@@ -8,32 +8,26 @@ async function testServerListen() {
     async (_req) => {
       // return new Response("Hello, world");
       // stream
-      const body = "Hello, World!\n";
-      // const body = new ReadableStream({
-      //   type: "bytes",
-      //   start(controller) {
-      //     controller.enqueue(encoder.encode("Hello, World! 1\n"));
-      //     controller.enqueue(encoder.encode("Hello, World! 2\n"));
-      //   },
-      //   async pull(controller) {
-      //     controller.enqueue(encoder.encode("Hello, World! 4\n"));
-      //     controller.close();
-      //   },
-      //   cancel() { },
-      // });
+      // const body = "Hello, World!\n";
+      const body = new ReadableStream({
+        type: "bytes",
+        start(controller) {
+          controller.enqueue(encoder.encode("Hello, World! 1\n"));
+          controller.enqueue(encoder.encode("Hello, World! 2\n"));
+        },
+        async pull(controller) {
+          controller.enqueue(encoder.encode("Hello, World! 4\n"));
+          // enqueue more data more then 64kb
+          for (let i = 0; i < 160; i++) {
+            controller.enqueue(encoder.encode(`Hello, World! ${i}\n`.repeat(5)));
+          }
 
-      // const headers = _req.headers;
-      // const url = _req.url;
-      // const method = _req.method;
-      // const data = await _req.text();
-      // // console.log("data: ", data);
-      // _req.signal;
+          controller.close();
+        },
+      });
 
       return new Response(body, {
-        headers: {
-          "content-type": "text/plain; charset=utf-8",
-          "server": "kedo/1.0",
-        },
+        headers: { "content-type": "application/octet-stream" },
       });
     },
     {

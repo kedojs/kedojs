@@ -12,7 +12,6 @@ tokio-util.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
 hyper-tls.workspace = true
-async-compression.workspace = true
 http-body-util.workspace = true
 form_urlencoded.workspace = true
 encoding_rs.workspace = true

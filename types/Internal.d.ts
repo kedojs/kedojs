@@ -56,10 +56,17 @@ declare module "@kedo:op/web" {
     export function op_read_sync_readable_stream(
         reader: ReadableStreamResourceReader,
     ): Uint8Array | undefined;
+    /**
+     * Write synchronously to the stream resource
+     * 
+     * @param resource 
+     * @param chunk 
+     * @returns number of bytes written if successful, -1 if the stream is closed, -2 if the stream is full
+     */
     export function op_write_sync_readable_stream(
         resource: ReadableStreamResource,
         chunk: Uint8Array,
-    ): void;
+    ): number;
     export function op_read_readable_stream(
         reader: ReadableStreamResourceReader,
         callback: OpStyleCallback<Uint8Array | undefined>,
@@ -82,6 +89,14 @@ declare module "@kedo:op/web" {
         sender: RequestEventResource,
         response: HttpResponse,
     ): void;
+    /**
+     * Write to the stream resource
+     * 
+     * @param resource
+     * @param chunk
+     * @param callback
+     * @returns number of bytes written if successful, -1 if the stream is closed.
+     */
     export function op_write_readable_stream(
         resource: ReadableStreamResource,
         chunk: Uint8Array,
@@ -144,7 +159,7 @@ declare module "@kedo:op/web" {
     export function op_http_request_keep_alive(_: HttpRequestResource): boolean;
     export function op_http_request_redirect(_: HttpRequestResource): number;
     export function op_http_request_redirect_count(_: HttpRequestResource): number;
-    export function op_http_request_body(_: HttpRequestResource): { stream?: ReadableStreamResource; source?: Uint8Array } | null;
+    export function op_http_request_body(_: HttpRequestResource): Uint8Array | ReadableStreamResource | null;
 }
 
 declare module "@kedo:op/fs" {
