@@ -21,10 +21,11 @@ fn stream_reource_constructor(
     constructor: JSObject,
     args: &[JSValue],
 ) -> JSResult<JSValue> {
-    let high_water_mark = match args.get(0) {
-        Some(arg) => arg.as_number()?,
-        None => 64.0,
-    };
+    let high_water_mark = 160;
+    // match args.get(0) {
+    //     Some(arg) => arg.as_number()?,
+    //     None => 64.0,
+    // };
 
     let state = downcast_state(&ctx);
     let class = state
@@ -206,7 +207,7 @@ fn op_write_sync_readable_stream(
     _: JSObject,
     _: JSObject,
     resource: JSObject,
-    chunk: JSObject,
+    chunk: JSValue,
 ) -> JSResult<JSValue> {
     let resource = downcast_ref::<BoundedBufferChannel<Vec<u8>>>(&resource);
     let channel = match resource {
@@ -214,8 +215,7 @@ fn op_write_sync_readable_stream(
         None => return Err(js_error_typ!(&ctx, "[Op:WriteSync] Invalid stream")),
     };
 
-    let typed_array = JSTypedArray::from(chunk);
-    let bytes = typed_array.as_vec::<u8>()?;
+    let bytes = JSTypedArray::bytes_from_value(&chunk)?.to_vec();
     let len = bytes.len() as f64;
 
     match channel.try_write(bytes) {

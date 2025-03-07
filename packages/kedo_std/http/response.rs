@@ -3,7 +3,7 @@ use super::{
 };
 use crate::FetchError;
 use bytes::Bytes;
-use http_body_util::{BodyExt, Empty, Full, StreamBody};
+use http_body_util::{BodyExt, Empty, Full};
 use hyper::Uri;
 
 impl TryInto<hyper::Response<HttpBody>> for FetchResponse {
@@ -17,7 +17,7 @@ impl TryInto<hyper::Response<HttpBody>> for FetchResponse {
         }
 
         let body = match self.body {
-            ResponseBody::EncodedStream(stream) => StreamBody::new(stream).boxed(),
+            ResponseBody::EncodedStream(stream) => stream.boxed(),
             ResponseBody::None => Empty::new()
                 .map_err(|_| FetchError::new("Http Empty Body Error"))
                 .boxed(),

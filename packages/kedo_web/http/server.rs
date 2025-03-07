@@ -165,27 +165,27 @@ impl HttpAccepter {
         self.handler.is_none()
     }
 
-    fn process_request(mut event: RequestEvent, function: JSObject) -> NativeJob {
-        // TODO: close the connection on error
-        let sender = event.sender.take().expect("Failed to take sender");
-        let request = FetchRequest::from_event(event).expect("Failed to convert request");
+    // fn process_request(mut event: RequestEvent, function: JSObject) -> NativeJob {
+    //     // TODO: close the connection on error
+    //     let sender = event.sender.take().expect("Failed to take sender");
+    //     let request = FetchRequest::from_event(event).expect("Failed to convert request");
 
-        NativeJob::new(move |ctx| {
-            let state = downcast_state(&ctx);
-            let classes = state.classes();
-            let request_object = classes
-                .get(FetchRequestResource::CLASS_NAME)
-                .expect("FetchRequestResource class not found")
-                .object::<FetchRequest>(&ctx, Some(Box::new(request)));
-            let sender = classes
-                .get(RequestEventResource::CLASS_NAME)
-                .expect("RequestEventResource class not found")
-                .object::<RequestEventSender>(&ctx, Some(Box::new(sender)));
+    //     NativeJob::new(move |ctx| {
+    //         let state = downcast_state(&ctx);
+    //         let classes = state.classes();
+    //         let request_object = classes
+    //             .get(FetchRequestResource::CLASS_NAME)
+    //             .expect("FetchRequestResource class not found")
+    //             .object::<FetchRequest>(&ctx, Some(Box::new(request)));
+    //         let sender = classes
+    //             .get(RequestEventResource::CLASS_NAME)
+    //             .expect("RequestEventResource class not found")
+    //             .object::<RequestEventSender>(&ctx, Some(Box::new(sender)));
 
-            let _ = function.call(None, &[request_object.into(), sender.into()])?;
-            Ok(())
-        })
-    }
+    //         let _ = function.call(None, &[request_object.into(), sender.into()])?;
+    //         Ok(())
+    //     })
+    // }
 }
 
 impl Future for HttpAccepter {
@@ -210,19 +210,15 @@ impl Future for HttpAccepter {
         let mut http_events = vec![];
         let mut is_channel_closed = false;
         loop {
-            let http_event = match self.receiver.as_mut().poll_next(cx) {
-                std::task::Poll::Ready(Some(event)) => event,
+            match self.receiver.as_mut().poll_next(cx) {
+                std::task::Poll::Ready(Some(event)) => http_events.push(event),
                 std::task::Poll::Pending => break,
                 std::task::Poll::Ready(None) => {
                     is_channel_closed = true;
                     // The channel has been closed
                     break;
-                    // return std::task::Poll::Ready(NativeJob::new(|_| Ok(())));
                 }
             };
-
-            http_events.push(http_event);
-            // println!("The request has been received");
         }
 
         if http_events.is_empty() {
@@ -233,29 +229,37 @@ impl Future for HttpAccepter {
             return std::task::Poll::Pending;
         }
 
-        // let http_event = match self.receiver.as_mut().poll_next(cx) {
-        //     std::task::Poll::Ready(Some(event)) => event,
-        //     std::task::Poll::Pending => return std::task::Poll::Pending,
-        //     std::task::Poll::Ready(None) => {
-        //         println!("The channel has been closed");
-        //         // The channel has been closed
-        //         return std::task::Poll::Ready(NativeJob::new(|_| Ok(())));
-        //     }
-        // };
-
-        // println!("The queue has been upgraded");
         if let Some(queue_rc) = self.queue.upgrade() {
             let queue_refcell: &RefCell<AsyncJobQueueInner> =
                 std::rc::Rc::as_ref(&queue_rc);
 
-            while let Some(http_event) = http_events.pop() {
-                queue_refcell
-                    .borrow_mut()
-                    .push_job(HttpAccepter::process_request(
-                        http_event,
-                        self.function.clone(),
-                    ));
-            }
+            let function = self.function.clone();
+            queue_refcell
+                .borrow_mut()
+                .push_job(NativeJob::new(move |ctx| {
+                    while let Some(mut event) = http_events.pop() {
+                        let sender = event.sender.take().expect("Failed to take sender");
+                        let request = FetchRequest::from_event(event)
+                            .expect("Failed to convert request");
+
+                        let state = downcast_state(&ctx);
+                        let classes = state.classes();
+                        let request_object = classes
+                            .get(FetchRequestResource::CLASS_NAME)
+                            .expect("FetchRequestResource class not found")
+                            .object::<FetchRequest>(&ctx, Some(Box::new(request)));
+                        let sender = classes
+                            .get(RequestEventResource::CLASS_NAME)
+                            .expect("RequestEventResource class not found")
+                            .object::<RequestEventSender>(&ctx, Some(Box::new(sender)));
+
+                        let _ = function
+                            .call(None, &[request_object.into(), sender.into()])?;
+                    }
+
+                    Ok(())
+                }));
+
             if is_channel_closed {
                 return std::task::Poll::Ready(NativeJob::new(|_| Ok(())));
             }

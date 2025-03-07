@@ -119,7 +119,7 @@ declare module "@kedo:op/web" {
         buffer: ArrayBuffer,
         stream?: boolean,
     ): string;
-    export function encoding_encode(input: string): Uint8Array;
+    export function encoding_encode(input: string): ArrayBuffer;
     export function encoding_decode_once(
         buffer: ArrayBuffer,
         label: string,

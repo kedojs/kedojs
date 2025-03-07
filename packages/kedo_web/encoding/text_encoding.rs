@@ -3,10 +3,8 @@ use encoding_rs::{CoderResult, DecoderResult, Encoding};
 use kedo_core::define_exports;
 use kedo_utils::downcast_ref;
 use rust_jsc::{
-    callback, JSArrayBuffer, JSContext, JSError, JSObject, JSResult, JSString,
-    JSTypedArray, JSValue,
+    callback, JSArrayBuffer, JSContext, JSError, JSObject, JSResult, JSString, JSValue,
 };
-use std::mem::ManuallyDrop;
 
 #[callback]
 pub fn encoding_for_label_no_replacement(
@@ -223,21 +221,31 @@ pub fn encoding_decode(
     }
 }
 
+// #[callback]
+// pub fn encoding_encode(
+//     ctx: JSContext,
+//     _: JSObject,
+//     _this: JSObject,
+//     input: JSString,
+// ) -> JSResult<JSValue> {
+//     let mut bytes: ManuallyDrop<Vec<u8>> = ManuallyDrop::new(input.into());
+//     let output = JSTypedArray::with_bytes::<u8>(
+//         &ctx,
+//         &mut bytes,
+//         rust_jsc::JSTypedArrayType::Uint8Array,
+//     )?;
+
+//     return Ok(output.into());
+// }
+
 #[callback]
 pub fn encoding_encode(
     ctx: JSContext,
     _: JSObject,
     _this: JSObject,
-    input: JSString,
+    input: JSValue,
 ) -> JSResult<JSValue> {
-    let mut bytes: ManuallyDrop<Vec<u8>> = ManuallyDrop::new(input.into());
-    let output = JSTypedArray::with_bytes::<u8>(
-        &ctx,
-        &mut bytes,
-        rust_jsc::JSTypedArrayType::Uint8Array,
-    )?;
-
-    return Ok(output.into());
+    JSValue::uft8_encode(&ctx, input)
 }
 
 pub struct TextEncodingModule;

@@ -109,7 +109,7 @@ class TextEncoder {
   }
 
   encode(input = ""): Uint8Array {
-    return encoding_encode(input);
+    return new Uint8Array(encoding_encode(input));
   }
 }
 

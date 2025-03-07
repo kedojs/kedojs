@@ -1,12 +1,10 @@
-use std::{cell::RefCell, rc::Rc, sync::Arc};
-
-use kedo_std::TimerQueue;
-use kedo_utils::ManuallyDropClone;
-
 use crate::{
     callback::JsProctectedCallable, class_table::ClassTable, modules::CoreModuleLoader,
     proto_table::ProtoTable, AsyncJobQueue,
 };
+use kedo_std::TimerQueue;
+use kedo_utils::ManuallyDropClone;
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 #[macro_export]
 macro_rules! enqueue_job {

@@ -7,24 +7,24 @@ async function testServerListen() {
         port: 8000,
     },
         async (req) => {
-            // const body = "Hello, World!\n";
-            const body = new ReadableStream({
-                type: "bytes",
-                start(controller) {
-                    controller.enqueue(encoder.encode("Hello, World! 1\n"));
-                    controller.enqueue(encoder.encode("Hello, World! 2\n"));
-                },
-                async pull(controller) {
-                    controller.enqueue(encoder.encode("Hello, World! 4\n"));
-                    // enqueue more data more then 64kb
-                    for (let i = 0; i < 160; i++) {
-                        controller.enqueue(encoder.encode(`Hello, World! ${i}\n`.repeat(5)));
-                    }
+            const body = "Hello, World!\n";
+            // const body = new ReadableStream({
+            //     type: "bytes",
+            //     start(controller) {
+            //         controller.enqueue(encoder.encode("Hello, World! 1\n"));
+            //         controller.enqueue(encoder.encode("Hello, World! 2\n"));
+            //     },
+            //     async pull(controller) {
+            //         controller.enqueue(encoder.encode("Hello, World! 4\n"));
+            //         // enqueue more data more then 64kb
+            //         for (let i = 0; i < 160; i++) {
+            //             controller.enqueue(encoder.encode(`Hello, World! ${i}\n`.repeat(5)));
+            //         }
 
-                    controller.close();
-                },
-                cancel() { },
-            });
+            //         controller.close();
+            //     },
+            //     cancel() { },
+            // });
             // body.pipeThrough(new TextEncoderStream())
             let response = new Response(body, {
                 headers: { "Content-Type": "application/octet-stream" },

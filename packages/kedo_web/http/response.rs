@@ -146,7 +146,6 @@ impl FetchResponseExt for FetchResponse {
         };
 
         let status = args[1].as_number()? as u16;
-        let status_message = args[2].as_string()?.to_string();
 
         let headers = JSArray::new(args[3].as_object()?);
         let headers_map = HeadersMap::from_array(headers)?;
@@ -158,7 +157,7 @@ impl FetchResponseExt for FetchResponse {
         Ok(FetchResponse {
             urls: vec![url],
             status,
-            status_message,
+            status_message: "".to_string(),
             headers: headers_map,
             aborted: false,
             body,

@@ -8,6 +8,7 @@ use async_compression::tokio::bufread::ZstdEncoder;
 use bytes::Bytes;
 use futures::ready;
 use futures::Stream;
+use hyper::body::Body;
 use hyper::header::ACCEPT_ENCODING;
 use std::pin::Pin;
 use tokio_util::codec::{BytesCodec, FramedRead};
@@ -233,6 +234,19 @@ impl Stream for StreamEncoder {
             Inner::Plain(stream) => stream.size_hint(),
             _ => Default::default(),
         }
+    }
+}
+
+impl Body for StreamEncoder {
+    type Data = Bytes;
+    type Error = FetchError;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<hyper::body::Frame<Self::Data>, Self::Error>>>
+    {
+        self.poll_next(cx)
     }
 }
 
