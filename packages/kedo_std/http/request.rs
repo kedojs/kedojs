@@ -1,5 +1,5 @@
 use super::{decoder::StreamDecoder, headers::HeadersMap};
-use crate::utils::TryClone;
+use crate::{utils::TryClone, IncomingBodyStream};
 use bytes::Bytes;
 use hyper::Uri;
 
@@ -182,6 +182,59 @@ impl FetchRequestBuilder {
             redirect_count: self.redirect_count.unwrap_or(20),
             body: self.body.unwrap_or(RequestBody::None),
         })
+    }
+}
+
+pub struct HttpRequest {
+    pub method: String,
+    pub uri: Uri,
+    pub headers: hyper::header::HeaderMap,
+    pub keep_alive: bool,
+    pub redirect: RequestRedirect,
+    pub redirect_count: u32,
+    pub body: RequestBody,
+}
+
+impl HttpRequest {
+    pub fn new(request: hyper::Request<hyper::body::Incoming>) -> Self {
+        let parts = request.into_parts();
+        let headers = parts.0.headers;
+        let uri = parts.0.uri;
+        let method = parts.0.method.to_string();
+        let keep_alive = false; // TODO: Check if keep-alive is supported
+        let redirect = RequestRedirect::Follow; // TODO: Handle redirects
+        let redirect_count = 0; // TODO: Handle redirect count
+
+        let body = RequestBody::Stream(Some(StreamDecoder::detect_from_headers(
+            IncomingBodyStream::new(parts.1).into(),
+            &headers,
+        )));
+
+        HttpRequest {
+            method,
+            uri,
+            headers,
+            keep_alive,
+            redirect,
+            redirect_count,
+            body,
+        }
+    }
+
+    pub fn method(&self) -> String {
+        self.method.clone()
+    }
+
+    pub fn keep_alive(&self) -> bool {
+        false
+    }
+
+    pub fn uri(&self) -> &Uri {
+        &self.uri
+    }
+
+    pub fn body(&mut self) -> RequestBody {
+        self.body.take()
     }
 }
 

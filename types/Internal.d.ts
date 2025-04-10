@@ -1,6 +1,7 @@
 type DecodedBodyStream = {};
 
 type RequestEventResource = {};
+type UnboundedBufferChannelReader = {};
 
 type HttpResponse = {
     readonly body?: DecodedBodyStream;

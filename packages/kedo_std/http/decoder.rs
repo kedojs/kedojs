@@ -131,6 +131,30 @@ impl StreamDecoder {
             Self::plain(stream)
         }
     }
+
+    pub fn detect_from_headers(
+        stream: IncomingBodyStream,
+        headers: &hyper::header::HeaderMap,
+    ) -> Self {
+        let mut encoding = None;
+        for (name, value) in headers.iter() {
+            if name == CONTENT_ENCODING {
+                encoding = Some(value.to_str().unwrap_or_default());
+            }
+        }
+
+        if let Some(encoding) = encoding {
+            match DecoderType::try_from(encoding) {
+                Ok(DecoderType::Gzip) => Self::gzip(stream),
+                Ok(DecoderType::Brotli) => Self::brotli(stream),
+                Ok(DecoderType::Zstd) => Self::zstd(stream),
+                Ok(DecoderType::Deflate) => Self::deflate(stream),
+                Err(_) => Self::plain(stream),
+            }
+        } else {
+            Self::plain(stream)
+        }
+    }
 }
 
 type IncomingStreamReader = StreamReader<IncomingBodyStream, Bytes>;

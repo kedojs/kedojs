@@ -5,7 +5,8 @@ use kedo_core::{define_exports, downcast_state};
 use kedo_macros::js_class;
 use kedo_std::{
     BoundedBufferChannel, FetchError, FetchRequest, FetchRequestBuilder, HeadersMap,
-    IncomingBodyStream, RequestBody, RequestEvent, RequestRedirect, StreamDecoder,
+    HttpRequest, IncomingBodyStream, RequestBody, RequestEvent, RequestRedirect,
+    StreamDecoder,
 };
 use kedo_utils::downcast_ref;
 use rust_jsc::{
@@ -159,6 +160,11 @@ fn fetch_request_from_value(value: &JSValue, ctx: &JSContext) -> JSResult<FetchR
 )]
 pub struct FetchRequestResource {}
 
+#[js_class(
+    resource = HttpRequest,
+)]
+pub struct HttpRequestResource {}
+
 #[callback]
 fn op_http_request_method(
     ctx: JSContext,
@@ -166,9 +172,9 @@ fn op_http_request_method(
     _: JSObject,
     request: JSObject,
 ) -> JSResult<JSValue> {
-    let client = downcast_ref::<FetchRequest>(&request);
+    let client = downcast_ref::<HttpRequest>(&request);
     let method = match client {
-        Some(client) => client.method.clone(),
+        Some(client) => client.method().to_string(),
         None => return Err(JSError::new_typ(&ctx, "[Op:Method] Invalid request")?),
     };
 
@@ -182,9 +188,9 @@ fn op_http_request_uri(
     _: JSObject,
     request: JSObject,
 ) -> JSResult<JSValue> {
-    let client = downcast_ref::<FetchRequest>(&request);
+    let client = downcast_ref::<HttpRequest>(&request);
     let uri = match client {
-        Some(client) => client.uri.to_string(),
+        Some(client) => client.uri().to_string(),
         None => return Err(JSError::new_typ(&ctx, "[Op:Uri] Invalid request")?),
     };
 
@@ -219,9 +225,9 @@ fn op_http_request_keep_alive(
     _: JSObject,
     request: JSObject,
 ) -> JSResult<JSValue> {
-    let client = downcast_ref::<FetchRequest>(&request);
+    let client = downcast_ref::<HttpRequest>(&request);
     let keep_alive = match client {
-        Some(client) => client.keep_alive,
+        Some(client) => client.keep_alive(),
         None => return Err(JSError::new_typ(&ctx, "[Op:KeepAlive] Invalid request")?),
     };
 
@@ -272,13 +278,13 @@ fn op_http_request_body(
     _: JSObject,
     request: JSObject,
 ) -> JSResult<JSValue> {
-    let client = downcast_ref::<FetchRequest>(&request);
+    let client = downcast_ref::<HttpRequest>(&request);
     let mut client = match client {
         Some(client) => client,
         None => return Err(JSError::new_typ(&ctx, "[Op:Body] Invalid request")?),
     };
 
-    if let Some(object) = client.body.take().to_object(&ctx)? {
+    if let Some(object) = client.body().to_object(&ctx)? {
         return Ok(object.into());
     }
 

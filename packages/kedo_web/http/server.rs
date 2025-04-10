@@ -1,15 +1,17 @@
 use crate::{
     http::{request::FetchRequestExt, response::FetchResponseExt},
     signals::{InternalSignal, OneshotSignal},
-    FetchRequestResource,
+    FetchRequestResource, HttpRequestResource,
 };
 use futures::Stream;
 use kedo_core::{
     downcast_state, enqueue_job, native_job, AsyncJobQueueInner, ClassTable, NativeJob,
 };
+use kedo_macros::js_class;
 use kedo_std::{
-    FetchRequest, FetchResponse, HttpServerBuilder, HttpSocketAddr, RequestEvent,
-    RequestEventSender, RequestReceiver, ServerHandle,
+    FetchRequest, FetchResponse, HttpRequest, HttpServerBuilder, HttpSocketAddr,
+    RequestEvent, RequestEventSender, RequestReceiver, ServerHandle, StreamError,
+    UnboundedBufferChannel, UnboundedBufferChannelReader, UnboundedBufferChannelWriter,
 };
 use kedo_utils::{downcast_ref, js_error, js_error_typ, js_undefined};
 use rust_jsc::{
@@ -32,7 +34,7 @@ struct ServerOptions {
     address: SocketAddr,
     key: Option<String>,
     cert: Option<String>,
-    handler: JSObject,
+    // handler: JSObject,
 }
 
 impl ServerOptions {
@@ -50,8 +52,8 @@ impl ServerOptions {
             .and_then(|v| v.as_string())
             .ok()
             .map(|s| s.to_string());
-        let handler = value.get_property("handler")?.as_object()?;
-        handler.protect();
+        // let handler = value.get_property("handler")?.as_object()?;
+        // handler.protect();
 
         let mut parsed_hostname = match (hostname.clone(), port).to_socket_addrs() {
             Ok(parsed) => parsed,
@@ -73,7 +75,7 @@ impl ServerOptions {
             address,
             key,
             cert,
-            handler,
+            // handler,
         })
     }
 
@@ -86,8 +88,9 @@ struct HttpAccepterBuilder {
     handler: Option<ServerHandle>,
     receiver: Option<RequestReceiver>,
     signal: Option<OneshotSignal>,
-    queue: Option<Weak<RefCell<AsyncJobQueueInner>>>,
-    function: Option<JSObject>,
+    // queue: Option<Weak<RefCell<AsyncJobQueueInner>>>,
+    stream: Option<UnboundedBufferChannelWriter<RequestEvent>>,
+    // function: Option<JSObject>,
 }
 
 impl HttpAccepterBuilder {
@@ -96,8 +99,9 @@ impl HttpAccepterBuilder {
             handler: None,
             receiver: None,
             signal: None,
-            queue: None,
-            function: None,
+            // queue: None,
+            stream: None,
+            // function: None,
         }
     }
 
@@ -116,23 +120,32 @@ impl HttpAccepterBuilder {
         self
     }
 
-    pub fn queue(mut self, queue: Weak<RefCell<AsyncJobQueueInner>>) -> Self {
-        self.queue = Some(queue);
-        self
-    }
+    // pub fn queue(mut self, queue: Weak<RefCell<AsyncJobQueueInner>>) -> Self {
+    //     self.queue = Some(queue);
+    //     self
+    // }
 
-    pub fn function(mut self, function: JSObject) -> Self {
-        self.function = Some(function);
+    // pub fn function(mut self, function: JSObject) -> Self {
+    //     self.function = Some(function);
+    //     self
+    // }
+
+    pub fn stream(mut self, stream: UnboundedBufferChannelWriter<RequestEvent>) -> Self {
+        self.stream = Some(stream);
         self
     }
 
     pub fn build(self) -> HttpAccepter {
+        // let stream: UnboundedBufferChannel<RequestEvent> = UnboundedBufferChannel::new();
+        // let writer = stream.writer().unwrap();
+
         HttpAccepter {
             handler: self.handler,
             receiver: Box::pin(self.receiver.expect("receiver is required")),
             signal: self.signal.expect("signal is required"),
-            queue: self.queue.expect("queue is required"),
-            function: self.function.expect("function is required"),
+            // queue: self.queue.expect("queue is required"),
+            stream: self.stream.expect("stream is required"),
+            // function: self.function.expect("function is required"),
         }
     }
 }
@@ -141,15 +154,22 @@ struct HttpAccepter {
     handler: Option<ServerHandle>,
     receiver: Pin<Box<RequestReceiver>>,
     signal: OneshotSignal,
-    queue: Weak<RefCell<AsyncJobQueueInner>>,
-    function: JSObject,
+    // queue: Weak<RefCell<AsyncJobQueueInner>>,
+    stream: UnboundedBufferChannelWriter<RequestEvent>,
+    // function: JSObject,
 }
 
-impl Drop for HttpAccepter {
-    fn drop(&mut self) {
-        self.function.unprotect();
-    }
-}
+// impl Drop for HttpAccepter {
+//     fn drop(&mut self) {
+//         self.function.unprotect();
+//     }
+// }
+
+#[js_class(
+    resource = UnboundedBufferChannelReader<RequestEvent>,
+    proto = "UnboundedBufferChannelReaderPrototype",
+)]
+pub struct UnboundedBufferChannelReaderResource {}
 
 impl HttpAccepter {
     fn shutdown(&mut self) {
@@ -199,6 +219,7 @@ impl Future for HttpAccepter {
         if let std::task::Poll::Ready(Ok(())) = shutdown_signal {
             match self.handler.take() {
                 Some(handler) => {
+                    println!("Shutting down the server");
                     handler.shutdown();
                 }
                 None => {}
@@ -207,11 +228,14 @@ impl Future for HttpAccepter {
             return std::task::Poll::Ready(NativeJob::new(|_| Ok(())));
         };
 
-        let mut http_events = vec![];
+        // let mut http_events = vec![];
         let mut is_channel_closed = false;
         loop {
             match self.receiver.as_mut().poll_next(cx) {
-                std::task::Poll::Ready(Some(event)) => http_events.push(event),
+                std::task::Poll::Ready(Some(event)) => {
+                    self.stream.try_write(event).expect("Failed to send event");
+                    // http_events.push(event)
+                }
                 std::task::Poll::Pending => break,
                 std::task::Poll::Ready(None) => {
                     is_channel_closed = true;
@@ -221,54 +245,182 @@ impl Future for HttpAccepter {
             };
         }
 
-        if http_events.is_empty() {
-            if is_channel_closed {
-                return std::task::Poll::Ready(NativeJob::new(|_| Ok(())));
-            }
-
-            return std::task::Poll::Pending;
+        if is_channel_closed {
+            return std::task::Poll::Ready(NativeJob::new(|_| Ok(())));
         }
 
-        if let Some(queue_rc) = self.queue.upgrade() {
-            let queue_refcell: &RefCell<AsyncJobQueueInner> =
-                std::rc::Rc::as_ref(&queue_rc);
+        // if http_events.is_empty() {
+        //     if is_channel_closed {
+        //         return std::task::Poll::Ready(NativeJob::new(|_| Ok(())));
+        //     }
 
-            let function = self.function.clone();
-            queue_refcell
-                .borrow_mut()
-                .push_job(NativeJob::new(move |ctx| {
-                    while let Some(mut event) = http_events.pop() {
-                        let sender = event.sender.take().expect("Failed to take sender");
-                        let request = FetchRequest::from_event(event)
-                            .expect("Failed to convert request");
+        //     return std::task::Poll::Pending;
+        // }
 
-                        let state = downcast_state(&ctx);
-                        let classes = state.classes();
-                        let request_object = classes
-                            .get(FetchRequestResource::CLASS_NAME)
-                            .expect("FetchRequestResource class not found")
-                            .object::<FetchRequest>(&ctx, Some(Box::new(request)));
-                        let sender = classes
-                            .get(RequestEventResource::CLASS_NAME)
-                            .expect("RequestEventResource class not found")
-                            .object::<RequestEventSender>(&ctx, Some(Box::new(sender)));
+        // if let Some(queue_rc) = self.queue.upgrade() {
+        //     let queue_refcell: &RefCell<AsyncJobQueueInner> =
+        //         std::rc::Rc::as_ref(&queue_rc);
 
-                        let _ = function
-                            .call(None, &[request_object.into(), sender.into()])?;
-                    }
+        //     let function = self.function.clone();
+        //     queue_refcell
+        //         .borrow_mut()
+        //         .push_job(NativeJob::new(move |ctx| {
+        //             while let Some(mut event) = http_events.pop() {
+        //                 let sender = event.sender.take().expect("Failed to take sender");
+        //                 let request = HttpRequest::new(event.req);
+        //                 // FetchRequest::from_event(event)
+        //                 //     .expect("Failed to convert request");
 
-                    Ok(())
-                }));
+        //                 let state = downcast_state(&ctx);
+        //                 let classes = state.classes();
+        //                 let request_object = classes
+        //                     .get(HttpRequestResource::CLASS_NAME)
+        //                     .expect("HttpRequestResource class not found")
+        //                     .object::<HttpRequest>(&ctx, Some(Box::new(request)));
+        //                 let sender = classes
+        //                     .get(RequestEventResource::CLASS_NAME)
+        //                     .expect("RequestEventResource class not found")
+        //                     .object::<RequestEventSender>(&ctx, Some(Box::new(sender)));
 
-            if is_channel_closed {
-                return std::task::Poll::Ready(NativeJob::new(|_| Ok(())));
+        //                 let _ = function
+        //                     .call(None, &[request_object.into(), sender.into()])?;
+        //             }
+
+        //             Ok(())
+        //         }));
+
+        //     if is_channel_closed {
+        //         return std::task::Poll::Ready(NativeJob::new(|_| Ok(())));
+        //     }
+
+        return std::task::Poll::Pending;
+        // };
+
+        // std::task::Poll::Ready(NativeJob::new(|_| Ok(())))
+    }
+}
+
+#[callback]
+fn op_read_request_event(
+    ctx: JSContext,
+    _: JSObject,
+    _: JSObject,
+    reader: JSObject,
+) -> JSResult<JSValue> {
+    let state = downcast_state(&ctx);
+    let reader = downcast_ref::<UnboundedBufferChannelReader<RequestEvent>>(&reader);
+    let event = match reader {
+        Some(mut reader) => reader.try_read(),
+        None => {
+            return Err(js_error_typ!(
+                &ctx,
+                "[Op:ReadRequestEvent] Invalid resource object"
+            ))
+        }
+    };
+
+    let mut event = match event {
+        Ok(event) => event,
+        Err(err) => match err {
+            StreamError::Empty => {
+                return Ok(js_undefined!(&ctx));
             }
+            _ => {
+                return Err(js_error_typ!(
+                    &ctx,
+                    format!("[Op:ReadRequestEvent] {}", err)
+                ))
+            }
+        },
+    };
 
-            return std::task::Poll::Pending;
+    let classes = state.classes();
+    let sender = event.sender.take().expect("Failed to take sender");
+    // let request = FetchRequest::from_event(event).expect("Failed to convert request");
+
+    let request_object = classes
+        .get(HttpRequestResource::CLASS_NAME)
+        .expect("FetchResponse class not found")
+        .object::<HttpRequest>(&ctx, Some(Box::new(HttpRequest::new(event.req))));
+    let sender_object = classes
+        .get(RequestEventResource::CLASS_NAME)
+        .expect("RequestEventResource class not found")
+        .object::<RequestEventSender>(&ctx, Some(Box::new(sender)));
+
+    let object = JSObject::new(&ctx);
+    object.set_property("request", &request_object, Default::default())?;
+    object.set_property("sender", &sender_object, Default::default())?;
+    Ok(object.into())
+}
+
+#[callback]
+fn op_read_async_request_event(
+    ctx: JSContext,
+    _: JSObject,
+    _: JSObject,
+    reader: JSObject,
+    callback: JSObject,
+) -> JSResult<JSValue> {
+    let state = downcast_state(&ctx);
+    let mut reader =
+        match downcast_ref::<UnboundedBufferChannelReader<RequestEvent>>(&reader) {
+            Some(reader) => reader,
+            None => {
+                return Err(js_error_typ!(
+                    &ctx,
+                    "[Op:ReadRequestEvent] Invalid resource object"
+                ))
+            }
         };
 
-        std::task::Poll::Ready(NativeJob::new(|_| Ok(())))
-    }
+    callback.protect();
+
+    enqueue_job!(state, async move {
+        let event = reader.read().await;
+
+        native_job!("op_read_async_request_event", move |ctx| {
+            let state = downcast_state(&ctx);
+            let classes = state.classes();
+            let mut event = match event {
+                Ok(event) => event,
+                Err(err) => match err {
+                    StreamError::Empty => {
+                        let _ = callback.call(None, &[js_undefined!(&ctx)])?;
+                        callback.unprotect();
+                        return Ok(());
+                    }
+                    _ => {
+                        let _ = callback
+                            .call(None, &[js_error!(ctx, format!("{}", err)).into()])?;
+                        callback.unprotect();
+                        return Ok(());
+                    }
+                },
+            };
+
+            let sender = event.sender.take().expect("Failed to take sender");
+            // let request =
+            //     FetchRequest::from_event(event).expect("Failed to convert request");
+
+            let request_object = classes
+                .get(HttpRequestResource::CLASS_NAME)
+                .expect("FetchResponse class not found")
+                .object::<HttpRequest>(&ctx, Some(Box::new(HttpRequest::new(event.req))));
+            let sender_object = classes
+                .get(RequestEventResource::CLASS_NAME)
+                .expect("RequestEventResource class not found")
+                .object::<RequestEventSender>(&ctx, Some(Box::new(sender)));
+
+            let object = JSObject::new(&ctx);
+            object.set_property("request", &request_object, Default::default())?;
+            object.set_property("sender", &sender_object, Default::default())?;
+            let _ = callback.call(None, &[js_undefined!(&ctx), object.into()])?;
+            callback.unprotect();
+            Ok(())
+        })
+    });
+
+    Ok(js_undefined!(&ctx))
 }
 
 #[callback]
@@ -297,7 +449,18 @@ fn op_internal_start_server(
         .addr(HttpSocketAddr::IpSocket(options.address()))
         .start();
 
-    enqueue_job!(downcast_state(&ctx), async move {
+    let mut channel: UnboundedBufferChannel<RequestEvent> = UnboundedBufferChannel::new();
+    let writer = channel.writer().unwrap();
+    let reader = channel.aquire_reader().unwrap();
+
+    let state = downcast_state(&ctx);
+    let reader_object = state
+        .classes()
+        .get(UnboundedBufferChannelReaderResource::CLASS_NAME)
+        .unwrap()
+        .object(&ctx, Some(Box::new(reader)));
+
+    enqueue_job!(state, async move {
         let server = server.await;
         // {
         //     Ok(server) => server,
@@ -324,12 +487,17 @@ fn op_internal_start_server(
                                 .handler(handler)
                                 .receiver(receiver)
                                 .signal(internal_signal.unwrap())
-                                .queue(job_queue)
-                                .function(options.handler)
+                                .stream(writer)
+                                // .queue(job_queue)
+                                // .function(options.handler)
                                 .build();
 
                             state.job_queue().borrow().spawn(Box::pin(accepter));
-                            callback.call(None, &[js_undefined!(&ctx), address])?;
+                            // callback.call(None, &[js_undefined!(&ctx), address])?;
+                            callback.call(
+                                None,
+                                &[js_undefined!(&ctx), reader_object.into()],
+                            )?;
                         }
                         Err(err) => {
                             let error = js_error!(ctx, format!("{}", err));
@@ -376,6 +544,31 @@ pub fn server_exports(ctx: &JSContext, exports: &JSObject) {
         .set_property(
             "op_send_event_response",
             &op_send_event_response_fn,
+            Default::default(),
+        )
+        .expect("Unable to set server property");
+
+    let op_read_request_event_fn = JSFunction::callback(
+        ctx,
+        Some("op_read_request_event"),
+        Some(op_read_request_event),
+    );
+    exports
+        .set_property(
+            "op_read_request_event",
+            &op_read_request_event_fn,
+            Default::default(),
+        )
+        .expect("Unable to set server property");
+    let op_read_async_request_event_fn = JSFunction::callback(
+        ctx,
+        Some("op_read_async_request_event"),
+        Some(op_read_async_request_event),
+    );
+    exports
+        .set_property(
+            "op_read_async_request_event",
+            &op_read_async_request_event_fn,
             Default::default(),
         )
         .expect("Unable to set server property");

@@ -2,6 +2,8 @@ import { asyncOp } from "@kedo/utils";
 import {
     InternalSignal,
     op_internal_start_server,
+    op_read_async_request_event,
+    op_read_request_event,
     op_send_event_response,
     op_send_signal
 } from "@kedo:op/web";
@@ -74,24 +76,52 @@ function serve(
         key: tlsCertificate?.key,
         cert: tlsCertificate?.cert,
         port: serverOptions?.port || 8080,
-        handler: serverHandler(handler, onError),
+        // handler: serverHandler(handler, onError),
         hostname: serverOptions?.hostname || "0.0.0.0",
     };
 
     asyncOp(op_internal_start_server, internalOptions)
-        .then((address) => {
-            const [hostname, port] = address.split(":");
+        .then((requestStream) => {
+            // const [hostname, port] = address.split(":");
             serverOptions?.onListen?.({
-                hostname: hostname || internalOptions.hostname,
-                port: port || internalOptions.port,
+                hostname: internalOptions.hostname,
+                port: internalOptions.port,
                 key: internalOptions.key,
                 cert: internalOptions.cert,
             });
+
+            return processRequests(requestStream, handler, onError);
         })
         .catch((error) => {
+            console.error("Error starting server: ", error.message);
             throw error;
         });
 }
+
+function processRequests(
+    channel: UnboundedBufferChannelReader,
+    handler: ServerHandler,
+    onError?: OnErrorHandler,
+): Promise<void> {
+    const internalHandler = serverHandler(handler, onError);
+
+    return (async () => {
+        while (true) {
+            let event = op_read_request_event(channel);
+            if (event === undefined) {
+                event = await asyncOp(op_read_async_request_event, channel);
+            }
+
+            if (event === undefined || event === null) {
+                break;
+            }
+
+            const sender = event.sender;
+            const requestObject = event.request;
+            internalHandler(requestObject, sender);
+        }
+    })();
+};
 
 function serverHandler(handler: ServerHandler, onError?: OnErrorHandler): InternalServerHandler {
     const asyncHandler = async (request: HttpRequestResource) => {

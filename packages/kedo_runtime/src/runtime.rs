@@ -9,8 +9,9 @@ use kedo_timers::Timer;
 use kedo_utils::JSGlobalObject;
 use kedo_web::{
     DecodedStreamResource, EncodingTextDecoder, FetchClientResource,
-    FetchRequestResource, InternalSignal, ReadableStreamResource,
-    ReadableStreamResourceReader, RequestEventResource, UrlRecord, WebModule,
+    FetchRequestResource, HttpRequestResource, InternalSignal, ReadableStreamResource,
+    ReadableStreamResourceReader, RequestEventResource,
+    UnboundedBufferChannelReaderResource, UrlRecord, WebModule,
 };
 use rust_jsc::{
     callback, uncaught_exception, uncaught_exception_event_loop, JSContext, JSError,
@@ -154,12 +155,16 @@ impl Runtime {
         InternalSignal::init_class(class_manager).expect("Failed to init InternalSignal");
         FetchRequestResource::init_class(class_manager)
             .expect("Failed to init FetchRequestResource");
+        HttpRequestResource::init_class(class_manager)
+            .expect("Failed to init HttpRequestResource");
         ReadableStreamResource::init_class(class_manager)
             .expect("Failed to init JsReadableStream");
         DecodedStreamResource::init_class(class_manager)
             .expect("Failed to init JsResponseBody");
         RequestEventResource::init_class(class_manager)
             .expect("Failed to init RequestEventResource");
+        UnboundedBufferChannelReaderResource::init_class(class_manager)
+            .expect("Failed to init UnboundedBufferChannelReaderResource");
     }
 
     fn init_proto(

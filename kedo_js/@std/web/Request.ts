@@ -1,4 +1,3 @@
-
 import { assert } from "@kedo/utils";
 import {
     op_http_request_body,
@@ -6,9 +5,13 @@ import {
     op_http_request_keep_alive,
     op_http_request_method,
     op_http_request_redirect_count,
-    op_http_request_uri
+    op_http_request_uri,
 } from "@kedo:op/web";
-import { AbortSignal, createDependentAbortSignal, newAbortSignal } from "./AbortSignal";
+import {
+    AbortSignal,
+    createDependentAbortSignal,
+    newAbortSignal,
+} from "./AbortSignal";
 import { extractBody, mixinBody } from "./Body";
 import {
     _headers,
@@ -18,14 +21,14 @@ import {
     _requestBody,
     _signal,
     decodedStreamToReadableStream,
-    HTTP_METHODS
+    HTTP_METHODS,
 } from "./commons";
 import {
     emptyHeader,
     fillHeadersMapFrom,
     headerInnerList,
     Headers,
-    headersFromInnerList
+    headersFromInnerList,
 } from "./Headers";
 
 type RequestInfo = Request | string;
@@ -159,7 +162,10 @@ class Request {
 
         request.credentials = init?.credentials ?? request.credentials;
         request.cache = init?.cache ?? request.cache;
-        if (request.cache === "only-if-cached" && request.mode !== "same-origin") {
+        if (
+            request.cache === "only-if-cached" &&
+            request.mode !== "same-origin"
+        ) {
             throw new TypeError("Invalid cache mode.");
         }
 
@@ -205,7 +211,8 @@ class Request {
         // 35. If either init["body"] exists and is non-null or inputBody is non-null, and request’s method is `GET` or `HEAD`, then throw a TypeError.
         if (
             (request.method === "GET" || request.method === "HEAD") &&
-            ((init?.body !== undefined && init.body !== null) || inputBody !== null)
+            ((init?.body !== undefined && init.body !== null) ||
+                inputBody !== null)
         ) {
             throw new TypeError("A GET/HEAD request cannot have a body.");
         }
@@ -229,7 +236,10 @@ class Request {
         // 38. Let inputOrInitBody be initBody if it is non-null; otherwise inputBody.
         const inputOrInitBody = initBody ?? inputBody;
         // 39. If inputOrInitBody is non-null and inputOrInitBody’s source is null, then:
-        if (inputOrInitBody !== null && (inputOrInitBody as any).source === null) {
+        if (
+            inputOrInitBody !== null &&
+            (inputOrInitBody as any).source === null
+        ) {
             // 39.1. If initBody is non-null and init["duplex"] does not exist, then throw a TypeError.
             // if (initBody !== null && init?.duplex === undefined) {
             //   throw new TypeError("Body is already used.");
@@ -370,7 +380,9 @@ class InnerRequestResource {
 
     get redirectCount() {
         if (this.#redirectCount === undefined) {
-            this.#redirectCount = op_http_request_redirect_count(this.requestResource);
+            this.#redirectCount = op_http_request_redirect_count(
+                this.requestResource,
+            );
         }
 
         return this.#redirectCount;
@@ -395,18 +407,36 @@ class InnerRequestResource {
 }
 
 // create internal inner request
-const createInnerRequestFromResource = (innerRequest: HttpRequestResource): InnerRequest => {
+const createInnerRequestFromResource = (
+    innerRequest: HttpRequestResource,
+): InnerRequest => {
     const request = new InnerRequestResource(innerRequest);
     return {
-        get method() { return request.method },
-        get url() { return new URL(request.url) },
-        get header_list() { return request.headerList },
-        get keepalive() { return request.keepalive },
-        get redirectCount() { return request.redirectCount },
-        get body() { return request.body },
+        get method() {
+            return request.method;
+        },
+        get url() {
+            return new URL(request.url);
+        },
+        get header_list() {
+            return request.headerList;
+        },
+        get keepalive() {
+            return request.keepalive;
+        },
+        get redirectCount() {
+            return request.redirectCount;
+        },
+        get body() {
+            return request.body;
+        },
         unsafeRequestFlag: false,
-        get urlList() { return [this.url] },
-        get currentURL() { return this.url },
+        get urlList() {
+            return [this.url];
+        },
+        get currentURL() {
+            return this.url;
+        },
         initiatorType: "fetch",
         mode: "cors",
         credentials: "same-origin",
@@ -417,9 +447,9 @@ const createInnerRequestFromResource = (innerRequest: HttpRequestResource): Inne
         responseTainting: "basic",
         referrerPolicy: "",
         integrity: "",
-        priority: "auto"
+        priority: "auto",
     };
-}
+};
 
 function toRequest(httpRequest: HttpRequestResource): Request {
     const innerRequest = createInnerRequestFromResource(httpRequest);
@@ -433,11 +463,4 @@ function toInnerRequest(request: Request): InnerRequest {
     return request[_request];
 }
 
-export {
-    InnerRequest,
-    Request,
-    RequestInfo,
-    toInnerRequest,
-    toRequest
-};
-
+export { InnerRequest, Request, RequestInfo, toInnerRequest, toRequest };

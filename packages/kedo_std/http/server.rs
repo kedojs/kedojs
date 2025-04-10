@@ -1,12 +1,12 @@
 use crate::http::body::HttpBody;
-use futures::{channel::oneshot, FutureExt as _, Stream};
+use futures::{channel::oneshot, FutureExt as _, Stream, TryFutureExt};
 use hyper::{body::Incoming, service::Service, Request, Response};
 use std::{borrow::BorrowMut, future::Future, net::ToSocketAddrs, pin::Pin, sync::Arc};
 use thiserror::Error;
 use tokio::{
     net::TcpListener,
     sync::{
-        mpsc::{self, UnboundedReceiver, UnboundedSender},
+        mpsc::{self},
         watch,
     },
 };
@@ -43,7 +43,7 @@ impl RequestEvent {
 }
 
 pub struct RequestReceiver {
-    inner: mpsc::UnboundedReceiver<RequestEvent>,
+    inner: mpsc::Receiver<RequestEvent>,
 }
 
 impl Stream for RequestReceiver {
@@ -106,12 +106,12 @@ impl ServerHandle {
 /// network applications in a modular and reusable way, decoupled from the
 /// underlying protocol.
 pub struct HttpService {
-    sender: UnboundedSender<RequestEvent>,
+    sender: mpsc::Sender<RequestEvent>,
 }
 
 impl HttpService {
-    pub fn new() -> (Self, UnboundedReceiver<RequestEvent>) {
-        let (sender, receiver) = mpsc::unbounded_channel::<RequestEvent>();
+    pub fn new() -> (Self, mpsc::Receiver<RequestEvent>) {
+        let (sender, receiver) = mpsc::channel::<RequestEvent>(10);
 
         (Self { sender }, receiver)
     }
@@ -142,17 +142,17 @@ impl Service<Request<Incoming>> for HttpService {
 
     fn call(&self, req: Request<Incoming>) -> Self::Future {
         let (sender, receiver) = oneshot::channel::<Response<HttpBody>>();
-
-        let send_result = self
-            .sender
-            .send(RequestEvent {
-                req,
-                sender: Some(sender),
-            })
-            .map_err(|_| ServiceError::SendError);
+        let sender_clone = self.sender.clone();
 
         Box::pin(async move {
-            send_result?;
+            sender_clone
+                .send(RequestEvent {
+                    req,
+                    sender: Some(sender),
+                })
+                .await
+                .map_err(|_| ServiceError::SendError)?;
+
             receiver.await.map_err(|_| ServiceError::ReceiveError)
         })
     }
@@ -299,7 +299,6 @@ impl HttpServer {
     async fn accept_http_connection(
         stream: tokio::net::TcpStream,
         serv_clone: HttpService,
-        ref mut shutdown_receiver: watch::Receiver<()>,
     ) {
         let stream = hyper_util::rt::TokioIo::new(Box::pin(stream));
         let rt = hyper_util::rt::TokioExecutor::new();
@@ -307,20 +306,22 @@ impl HttpServer {
         let conn = builder.serve_connection_with_upgrades(stream, serv_clone);
         tokio::pin!(conn);
 
-        tokio::select! {
-            connection = conn.as_mut() => {
-                match connection {
-                    Ok(_) => {},
-                    Err(_) => {
-                        // eprintln!("Error accepting connection: {:?}", e);
-                    }
-                }
-            },
-            _ = shutdown_receiver.changed() => {
-                conn.as_mut().graceful_shutdown();
-                return;
-            }
-        }
+        let _ = conn.as_mut().await;
+
+        // tokio::select! {
+        //     connection = conn.as_mut() => {
+        //         match connection {
+        //             Ok(_) => {},
+        //             Err(_) => {
+        //                 // eprintln!("Error accepting connection: {:?}", e);
+        //             }
+        //         }
+        //     },
+        //     _ = shutdown_receiver.changed() => {
+        //         conn.as_mut().graceful_shutdown();
+        //         return;
+        //     }
+        // }
     }
 
     fn accept_connection(
@@ -347,12 +348,7 @@ impl HttpServer {
                     .await;
                 }
                 None => {
-                    HttpServer::accept_http_connection(
-                        stream,
-                        serv_clone,
-                        shutdown_receiver,
-                    )
-                    .await;
+                    HttpServer::accept_http_connection(stream, serv_clone).await;
                 }
             };
         });

@@ -424,6 +424,375 @@ impl<T> Stream for BoundedBufferChannelReader<T> {
     }
 }
 
+/// |--------------------------------------------------------------------------|
+/// |                      UnboundedBufferChannel                              |
+/// |--------------------------------------------------------------------------|
+/// An unbounded buffer channel implementation that wraps Tokio's unbounded MPSC channel.
+///
+/// This struct provides a message-passing channel with an unlimited buffer size,
+/// allowing communication between different parts of async code without backpressure.
+///
+/// # Type Parameters
+///
+/// * `T` - The type of values being sent through the channel
+///
+/// # Fields
+///
+/// * `sender` - Optional sender half of the channel
+/// * `receiver` - Optional receiver half of the channel
+/// * `completion` - Tracks the completion state of the stream
+///
+/// # Examples
+///
+/// ```
+/// use kedo_std::UnboundedBufferChannel;
+///
+/// let channel: UnboundedBufferChannel<i32> = UnboundedBufferChannel::new();
+/// ```
+pub struct UnboundedBufferChannel<T> {
+    sender: Option<tokio::sync::mpsc::UnboundedSender<T>>,
+    receiver: Option<tokio::sync::mpsc::UnboundedReceiver<T>>,
+    completion: StreamCompletion,
+}
+
+impl<T> Drop for UnboundedBufferChannel<T> {
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
+impl<T> UnboundedBufferChannel<T> {
+    /// Creates a new unbounded buffer channel.
+    ///
+    /// An unbounded buffer channel is a channel that can hold an unlimited number of items
+    /// without blocking on writes. This implementation uses tokio's unbounded mpsc channel internally.
+    ///
+    /// # Returns
+    ///
+    /// Returns a new `UnboundedBufferChannel<T>` instance.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let channel = UnboundedBufferChannel::<i32>::new(); // Creates an unbounded channel
+    /// ```
+    pub fn new() -> Self {
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+
+        Self {
+            sender: Some(sender),
+            receiver: Some(receiver),
+            completion: StreamCompletion::default(),
+        }
+    }
+
+    /// Attempts to write an item to the channel.
+    ///
+    /// This method will try to send an item through the channel immediately,
+    /// failing only if the channel is closed.
+    ///
+    /// # Arguments
+    ///
+    /// * `item` - The item to send through the channel
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the item was successfully sent, or a `StreamError::Closed`
+    /// if the channel is closed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let channel = UnboundedBufferChannel::<i32>::new();
+    /// match channel.try_write(42) {
+    ///     Ok(()) => println!("Successfully wrote to channel"),
+    ///     Err(StreamError::Closed) => println!("Channel is closed"),
+    ///     _ => println!("Other error occurred"),
+    /// }
+    /// ```
+    pub fn try_write(&self, item: T) -> Result<(), StreamError> {
+        self.sender
+            .as_ref()
+            .ok_or(StreamError::Closed)?
+            .send(item)
+            .map_err(|_| StreamError::Closed)
+    }
+
+    /// Attempts to read an item from the channel without blocking.
+    ///
+    /// This method will try to receive an item from the channel immediately,
+    /// failing if the channel is empty or closed.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(T)` with the received item if successful, or a `StreamError` if:
+    /// - The channel is empty (`StreamError::Empty`)
+    /// - The channel is closed (`StreamError::Closed`)
+    /// - The receiver has been taken (`StreamError::ReceiverTaken`)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut channel = UnboundedBufferChannel::<i32>::new();
+    /// match channel.try_read() {
+    ///     Ok(value) => println!("Read value: {}", value),
+    ///     Err(StreamError::Empty) => println!("Channel is empty"),
+    ///     Err(StreamError::Closed) => println!("Channel is closed"),
+    ///     Err(StreamError::ReceiverTaken) => println!("Receiver was taken"),
+    ///     _ => println!("Other error occurred"),
+    /// }
+    /// ```
+    pub fn try_read(&mut self) -> Result<T, StreamError> {
+        match self.receiver.as_mut() {
+            Some(receiver) => receiver.try_recv().map_err(|e| match e {
+                tokio::sync::mpsc::error::TryRecvError::Empty => StreamError::Empty,
+                tokio::sync::mpsc::error::TryRecvError::Disconnected => {
+                    StreamError::Closed
+                }
+            }),
+            None => Err(StreamError::ReceiverTaken),
+        }
+    }
+
+    /// Asynchronously reads an item from the channel.
+    ///
+    /// This method will wait for an item to become available if the channel
+    /// is empty. If the channel is closed and empty, it returns an error.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(T)` with the received item if successful, or `StreamError::Closed`
+    /// if the channel is closed and no more items are available.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut channel = UnboundedBufferChannel::<i32>::new();
+    /// match channel.read().await {
+    ///     Ok(value) => println!("Read value: {}", value),
+    ///     Err(e) => println!("Error reading: {}", e),
+    /// }
+    /// ```
+    pub async fn read(&mut self) -> Result<T, StreamError> {
+        let receiver = self.receiver.as_mut().ok_or(StreamError::ReceiverTaken)?;
+
+        receiver.recv().await.ok_or(StreamError::Closed)
+    }
+
+    /// Acquires a reader for this channel.
+    ///
+    /// This method takes ownership of the receiver half of the channel and returns
+    /// a reader that can be used to receive values. Once the reader is acquired,
+    /// no further readers can be acquired and attempts to read directly from the
+    /// channel will fail.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(UnboundedBufferChannelReader<T>)` if the reader was successfully
+    /// acquired, or `None` if the reader was already taken.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut channel = UnboundedBufferChannel::<i32>::new();
+    /// let reader = channel.aquire_reader().unwrap();
+    /// ```
+    pub fn aquire_reader(&mut self) -> Option<UnboundedBufferChannelReader<T>> {
+        if let Some(receiver) = self.receiver.take() {
+            Some(UnboundedBufferChannelReader { receiver })
+        } else {
+            None
+        }
+    }
+
+    /// Creates a writer for this channel.
+    ///
+    /// This method creates a writer that can be used to send values to the channel.
+    /// Multiple writers can be created from a single channel.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(UnboundedBufferChannelWriter<T>)` if the writer was successfully
+    /// created, or `None` if the sender half has been closed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let channel = UnboundedBufferChannel::<i32>::new();
+    /// let writer = channel.writer().unwrap();
+    /// ```
+    pub fn writer(&self) -> Option<UnboundedBufferChannelWriter<T>> {
+        Some(UnboundedBufferChannelWriter {
+            sender: self.sender.as_ref()?.clone(),
+        })
+    }
+
+    /// Closes the channel.
+    ///
+    /// This method closes the sender half of the channel, which means that no more
+    /// values can be sent through it. Any in-flight values will still be received.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut channel = UnboundedBufferChannel::<i32>::new();
+    /// channel.close();
+    /// ```
+    pub fn close(&mut self) {
+        let _ = self.sender.take();
+        self.completion.close();
+    }
+
+    /// Gets the completion state for this channel.
+    ///
+    /// The completion state can be awaited to be notified when the channel is closed.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `StreamCompletion` that can be used to track the channel's completion state.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let channel = UnboundedBufferChannel::<i32>::new();
+    /// let completion = channel.completion();
+    /// tokio::spawn(async move {
+    ///     completion.await.unwrap();
+    ///     println!("Channel was closed");
+    /// });
+    /// ```
+    pub fn completion(&self) -> StreamCompletion {
+        self.completion.clone()
+    }
+}
+
+impl<T> Default for UnboundedBufferChannel<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A writer handle for the unbounded buffer channel.
+///
+/// This struct provides a way to write values to the channel from multiple locations.
+///
+/// # Type Parameters
+///
+/// * `T` - The type of values being sent through the channel
+pub struct UnboundedBufferChannelWriter<T> {
+    sender: tokio::sync::mpsc::UnboundedSender<T>,
+}
+
+impl<T> UnboundedBufferChannelWriter<T> {
+    /// Attempts to write an item to the channel.
+    ///
+    /// This method is identical to `write` for unbounded channels but is provided
+    /// for API consistency with BoundedBufferChannelWriter.
+    ///
+    /// # Arguments
+    ///
+    /// * `item` - The item to send through the channel
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the item was successfully sent, or `StreamError::Closed`
+    /// if the channel is closed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let channel = UnboundedBufferChannel::<i32>::new();
+    /// let writer = channel.writer().unwrap();
+    /// match writer.try_write(42) {
+    ///     Ok(()) => println!("Successfully wrote to channel"),
+    ///     Err(e) => println!("Failed to write: {}", e),
+    /// }
+    /// ```
+    pub fn try_write(&self, item: T) -> Result<(), StreamError> {
+        self.sender.send(item).map_err(|_| StreamError::Closed)
+    }
+}
+
+/// A reader handle for the unbounded buffer channel.
+///
+/// This struct provides methods to read values from the channel and can be used
+/// as a Stream implementation for working with async iterators.
+///
+/// # Type Parameters
+///
+/// * `T` - The type of values being received from the channel
+#[derive(Debug)]
+pub struct UnboundedBufferChannelReader<T> {
+    receiver: tokio::sync::mpsc::UnboundedReceiver<T>,
+}
+
+impl<T> UnboundedBufferChannelReader<T> {
+    /// Attempts to read an item from the channel without blocking.
+    ///
+    /// This method will immediately return an error if the channel is empty
+    /// or closed, rather than waiting for a value.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(T)` with the received item if successful, or a `StreamError` if:
+    /// - The channel is empty (`StreamError::Empty`)
+    /// - The channel is closed (`StreamError::Closed`)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut channel = UnboundedBufferChannel::<i32>::new();
+    /// let mut reader = channel.aquire_reader().unwrap();
+    /// match reader.try_read() {
+    ///     Ok(value) => println!("Read value: {}", value),
+    ///     Err(e) => println!("Error reading: {}", e),
+    /// }
+    /// ```
+    pub fn try_read(&mut self) -> Result<T, StreamError> {
+        self.receiver.try_recv().map_err(|e| match e {
+            tokio::sync::mpsc::error::TryRecvError::Empty => StreamError::Empty,
+            tokio::sync::mpsc::error::TryRecvError::Disconnected => StreamError::Closed,
+        })
+    }
+
+    /// Asynchronously reads an item from the channel.
+    ///
+    /// This method will wait for an item to become available if the channel
+    /// is empty. If the channel is closed and empty, it returns an error.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(T)` with the received item if successful, or `StreamError::Closed`
+    /// if the channel is closed and no more items are available.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut channel = UnboundedBufferChannel::<i32>::new();
+    /// let mut reader = channel.aquire_reader().unwrap();
+    /// match reader.read().await {
+    ///     Ok(value) => println!("Read value: {}", value),
+    ///     Err(e) => println!("Error reading: {}", e),
+    /// }
+    /// ```
+    pub async fn read(&mut self) -> Result<T, StreamError> {
+        self.receiver.recv().await.ok_or(StreamError::Closed)
+    }
+}
+
+impl<T> Stream for UnboundedBufferChannelReader<T> {
+    type Item = T;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        // Safety: We're not moving the struct; we're only accessing its fields.
+        let self_mut = self.get_mut();
+
+        // Pin the receiver since `poll_recv` requires a `Pin<&mut UnboundedReceiver<T>>`.
+        let mut receiver = Pin::new(&mut self_mut.receiver);
+        receiver.poll_recv(cx)
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -558,5 +927,139 @@ mod tests {
         let result = channel.try_write(vec![5]);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), StreamError::ChannelFull);
+    }
+
+    #[test]
+    fn test_unbounded_buffer_channel() {
+        let mut stream = UnboundedBufferChannel::<Vec<u8>>::new();
+        for i in 0..5 {
+            stream.try_write(vec![i as u8]).unwrap();
+        }
+
+        assert_eq!(stream.try_read().unwrap(), vec![0]);
+        assert_eq!(stream.try_read().unwrap(), vec![1]);
+        assert_eq!(stream.try_read().unwrap(), vec![2]);
+        assert_eq!(stream.try_read().unwrap(), vec![3]);
+        assert_eq!(stream.try_read().unwrap(), vec![4]);
+        assert!(stream.try_read().is_err());
+    }
+
+    #[tokio::test]
+    async fn test_unbounded_buffer_channel_async() {
+        let mut stream = UnboundedBufferChannel::<Vec<u8>>::new();
+        for i in 0..5 {
+            stream.try_write(vec![i as u8]).unwrap();
+        }
+
+        assert_eq!(stream.read().await.unwrap(), vec![0]);
+        assert_eq!(stream.read().await.unwrap(), vec![1]);
+        assert_eq!(stream.read().await.unwrap(), vec![2]);
+        assert_eq!(stream.read().await.unwrap(), vec![3]);
+        assert_eq!(stream.read().await.unwrap(), vec![4]);
+    }
+
+    #[tokio::test]
+    async fn test_unbounded_buffer_channel_async_close() {
+        let mut stream = UnboundedBufferChannel::<Vec<u8>>::new();
+        for i in 0..5 {
+            stream.try_write(vec![i as u8]).unwrap();
+        }
+
+        let mut stream_reader = stream.aquire_reader().unwrap();
+        stream.close();
+        let result = stream_reader.read().await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), vec![0]);
+
+        drop(stream_reader);
+        let result = stream.try_write(vec![5]);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), StreamError::Closed);
+    }
+
+    #[tokio::test]
+    async fn test_unbounded_buffer_channel_completion() {
+        let mut stream = UnboundedBufferChannel::<Vec<u8>>::new();
+        for i in 0..5 {
+            stream.try_write(vec![i as u8]).unwrap();
+        }
+
+        let completion = stream.completion();
+        let future = async {
+            completion.await.unwrap();
+        };
+
+        let close_future = async {
+            // wait for 1 second before closing the stream
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            stream.close();
+        };
+
+        tokio::join!(
+            tokio::time::timeout(std::time::Duration::from_secs(2), future),
+            close_future
+        )
+        .0
+        .unwrap();
+    }
+
+    #[test]
+    fn test_unbounded_buffer_channel_reader() {
+        let mut channel = UnboundedBufferChannel::<Vec<u8>>::new();
+        for i in 0..5 {
+            channel.try_write(vec![i as u8]).unwrap();
+        }
+
+        let mut reader = channel.aquire_reader().unwrap();
+        assert_eq!(reader.try_read().unwrap(), vec![0]);
+        assert_eq!(reader.try_read().unwrap(), vec![1]);
+        assert_eq!(reader.try_read().unwrap(), vec![2]);
+        assert_eq!(reader.try_read().unwrap(), vec![3]);
+        assert_eq!(reader.try_read().unwrap(), vec![4]);
+    }
+
+    #[tokio::test]
+    async fn test_unbounded_buffer_channel_reader_async() {
+        let mut channel = UnboundedBufferChannel::<Vec<u8>>::new();
+        for i in 0..5 {
+            channel.try_write(vec![i as u8]).unwrap();
+        }
+
+        let mut reader = channel.aquire_reader().unwrap();
+        assert_eq!(reader.read().await.unwrap(), vec![0]);
+        assert_eq!(reader.read().await.unwrap(), vec![1]);
+        assert_eq!(reader.read().await.unwrap(), vec![2]);
+        assert_eq!(reader.read().await.unwrap(), vec![3]);
+        assert_eq!(reader.read().await.unwrap(), vec![4]);
+    }
+
+    #[tokio::test]
+    async fn test_unbounded_channel_large_capacity() {
+        let mut channel = UnboundedBufferChannel::<Vec<u8>>::new();
+        // Try writing a large number of items (which would block on bounded channels)
+        for i in 0..1000 {
+            channel.try_write(vec![i as u8]).unwrap();
+        }
+
+        let mut reader = channel.aquire_reader().unwrap();
+        // Read just a few to verify
+        assert_eq!(reader.read().await.unwrap(), vec![0]);
+        assert_eq!(reader.read().await.unwrap(), vec![1]);
+        assert_eq!(reader.read().await.unwrap(), vec![2]);
+    }
+
+    #[test]
+    fn test_unbounded_buffer_writer() {
+        let mut channel = UnboundedBufferChannel::<Vec<u8>>::new();
+        let writer = channel.writer().unwrap();
+
+        for i in 0..5 {
+            writer.try_write(vec![i as u8]).unwrap();
+        }
+
+        let mut reader = channel.aquire_reader().unwrap();
+        assert_eq!(reader.try_read().unwrap(), vec![0]);
+        assert_eq!(reader.try_read().unwrap(), vec![1]);
+        assert_eq!(reader.try_read().unwrap(), vec![2]);
     }
 }
