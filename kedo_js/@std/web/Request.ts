@@ -359,10 +359,10 @@ class InnerRequestResource {
             this.#url = op_http_request_uri(this.requestResource);
         }
 
-        return this.#url;
+        return new URL(this.#url);
     }
 
-    get headerList() {
+    get header_list() {
         if (!this.#headerList) {
             this.#headerList = op_http_request_headers(this.requestResource);
         }
@@ -404,6 +404,50 @@ class InnerRequestResource {
 
         return this.#body;
     }
+
+    get priority(): RequestPriority {
+        return "auto";
+    }
+    get origin() {
+        return "client";
+    }
+    get referrer() {
+        return "client";
+    }
+    get referrerPolicy(): ReferrerPolicy {
+        return "";
+    }
+    get mode(): RequestMode {
+        return "cors";
+    }
+    get useCORSPreflightFlag() {
+        return false;
+    }
+    get redirect(): RequestRedirect {
+        return "follow";
+    }
+    get cache(): RequestCache {
+        return "default";
+    }
+
+    get integrity() {
+        return "";
+    }
+    get credentials(): RequestCredentials {
+        return "same-origin";
+    }
+    get initiatorType(): "fetch" {
+        return "fetch"
+    }
+    get urlList() {
+        return [this.url];
+    }
+    get currentURL() {
+        return this.url;
+    }
+    get responseTainting(): ResponseTainting {
+        return "basic";
+    }
 }
 
 // create internal inner request
@@ -411,44 +455,7 @@ const createInnerRequestFromResource = (
     innerRequest: HttpRequestResource,
 ): InnerRequest => {
     const request = new InnerRequestResource(innerRequest);
-    return {
-        get method() {
-            return request.method;
-        },
-        get url() {
-            return new URL(request.url);
-        },
-        get header_list() {
-            return request.headerList;
-        },
-        get keepalive() {
-            return request.keepalive;
-        },
-        get redirectCount() {
-            return request.redirectCount;
-        },
-        get body() {
-            return request.body;
-        },
-        unsafeRequestFlag: false,
-        get urlList() {
-            return [this.url];
-        },
-        get currentURL() {
-            return this.url;
-        },
-        initiatorType: "fetch",
-        mode: "cors",
-        credentials: "same-origin",
-        cache: "default",
-        redirect: "follow",
-        referrer: "client",
-        origin: "client",
-        responseTainting: "basic",
-        referrerPolicy: "",
-        integrity: "",
-        priority: "auto",
-    };
+    return request;
 };
 
 function toRequest(httpRequest: HttpRequestResource): Request {

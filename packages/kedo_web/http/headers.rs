@@ -47,6 +47,35 @@ impl HeadersMapExt for HeadersMap {
     }
 }
 
+impl HeadersMapExt for hyper::header::HeaderMap {
+    fn into_value(
+        &self,
+        ctx: &rust_jsc::JSContext,
+    ) -> rust_jsc::JSResult<rust_jsc::JSValue> {
+        let mut response_headers: Vec<rust_jsc::JSValue> = vec![];
+        for (key, value) in self.iter() {
+            let key = rust_jsc::JSValue::string(ctx, JSString::from(key.as_str()));
+            let value =
+                rust_jsc::JSValue::string(ctx, JSString::from(value.to_str().unwrap()));
+            let header = JSArray::new_array(ctx, &[key, value])?;
+            // We need to protect the header object to prevent it from being garbage collected
+            header.protect();
+            response_headers.push(header.into());
+        }
+
+        let headers = JSArray::new_array(ctx, response_headers.as_slice())?;
+        // Then unprotect the headers array to prevent memory leaks
+        response_headers
+            .iter()
+            .for_each(|header| header.unprotect());
+        Ok(headers.into())
+    }
+
+    fn from_array(value: JSArray) -> JSResult<HeadersMap> {
+        todo!()
+    }
+}
+
 //     fn headers_map_into_value(
 //         &self,
 //         ctx: &rust_jsc::JSContext,

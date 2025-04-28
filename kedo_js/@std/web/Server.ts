@@ -81,16 +81,16 @@ function serve(
     };
 
     asyncOp(op_internal_start_server, internalOptions)
-        .then((requestStream) => {
-            // const [hostname, port] = address.split(":");
+        .then(({ reader, address }) => {
+            const [hostname, port] = address.split(":");
             serverOptions?.onListen?.({
-                hostname: internalOptions.hostname,
-                port: internalOptions.port,
+                hostname: hostname,
+                port: port,
                 key: internalOptions.key,
                 cert: internalOptions.cert,
             });
 
-            return processRequests(requestStream, handler, onError);
+            return processRequests(reader, handler, onError);
         })
         .catch((error) => {
             console.error("Error starting server: ", error.message);

@@ -1,16 +1,14 @@
 use crate::{
-    http::{request::FetchRequestExt, response::FetchResponseExt},
+    http::response::FetchResponseExt,
     signals::{InternalSignal, OneshotSignal},
-    FetchRequestResource, HttpRequestResource,
+    HttpRequestResource,
 };
 use futures::Stream;
-use kedo_core::{
-    downcast_state, enqueue_job, native_job, AsyncJobQueueInner, ClassTable, NativeJob,
-};
+use kedo_core::{downcast_state, enqueue_job, native_job, ClassTable, NativeJob};
 use kedo_macros::js_class;
 use kedo_std::{
-    FetchRequest, FetchResponse, HttpRequest, HttpServerBuilder, HttpSocketAddr,
-    RequestEvent, RequestEventSender, RequestReceiver, ServerHandle, StreamError,
+    FetchResponse, HttpRequest, HttpServerBuilder, HttpSocketAddr, RequestEvent,
+    RequestEventSender, RequestReceiver, ServerHandle, StreamError,
     UnboundedBufferChannel, UnboundedBufferChannelReader, UnboundedBufferChannelWriter,
 };
 use kedo_utils::{downcast_ref, js_error, js_error_typ, js_undefined};
@@ -19,12 +17,9 @@ use rust_jsc::{
     JSContext, JSError, JSFunction, JSObject, JSResult, JSValue, PrivateData,
 };
 use std::{
-    borrow::BorrowMut,
-    cell::RefCell,
     future::Future,
     net::{SocketAddr, ToSocketAddrs},
     pin::Pin,
-    rc::Weak,
     vec,
 };
 
@@ -451,7 +446,7 @@ fn op_internal_start_server(
 
     let mut channel: UnboundedBufferChannel<RequestEvent> = UnboundedBufferChannel::new();
     let writer = channel.writer().unwrap();
-    let reader = channel.aquire_reader().unwrap();
+    let reader = channel.acquire_reader().unwrap();
 
     let state = downcast_state(&ctx);
     let reader_object = state
@@ -474,30 +469,36 @@ fn op_internal_start_server(
 
         native_job!("op_internal_start_server", move |ctx| {
             let state = downcast_state(&ctx);
-            let job_queue = state.job_queue().borrow().borrow_mut().leak();
+            // let job_queue = state.job_queue().borrow().borrow_mut().leak();
 
             match server {
                 Ok(http_server) => {
                     let accepter = http_server.accept();
                     match accepter {
                         Ok((handler, receiver)) => {
-                            let address =
-                                JSValue::string(&ctx, format!("{}", options.address()));
                             let accepter = HttpAccepterBuilder::new()
                                 .handler(handler)
                                 .receiver(receiver)
                                 .signal(internal_signal.unwrap())
                                 .stream(writer)
-                                // .queue(job_queue)
-                                // .function(options.handler)
                                 .build();
 
-                            state.job_queue().borrow().spawn(Box::pin(accepter));
-                            // callback.call(None, &[js_undefined!(&ctx), address])?;
-                            callback.call(
-                                None,
-                                &[js_undefined!(&ctx), reader_object.into()],
+                            let address =
+                                JSValue::string(&ctx, format!("{}", options.address()));
+                            let object = JSObject::new(&ctx);
+                            object.set_property(
+                                "address",
+                                &address,
+                                Default::default(),
                             )?;
+                            object.set_property(
+                                "reader",
+                                &reader_object,
+                                Default::default(),
+                            )?;
+
+                            state.job_queue().borrow().spawn(Box::pin(accepter));
+                            callback.call(None, &[js_undefined!(&ctx), object.into()])?;
                         }
                         Err(err) => {
                             let error = js_error!(ctx, format!("{}", err));

@@ -595,9 +595,9 @@ impl<T> UnboundedBufferChannel<T> {
     ///
     /// ```
     /// let mut channel = UnboundedBufferChannel::<i32>::new();
-    /// let reader = channel.aquire_reader().unwrap();
+    /// let reader = channel.acquire_reader().unwrap();
     /// ```
-    pub fn aquire_reader(&mut self) -> Option<UnboundedBufferChannelReader<T>> {
+    pub fn acquire_reader(&mut self) -> Option<UnboundedBufferChannelReader<T>> {
         if let Some(receiver) = self.receiver.take() {
             Some(UnboundedBufferChannelReader { receiver })
         } else {
@@ -679,8 +679,17 @@ impl<T> Default for UnboundedBufferChannel<T> {
 /// # Type Parameters
 ///
 /// * `T` - The type of values being sent through the channel
+#[derive(Debug)]
 pub struct UnboundedBufferChannelWriter<T> {
     sender: tokio::sync::mpsc::UnboundedSender<T>,
+}
+
+impl<T> Clone for UnboundedBufferChannelWriter<T> {
+    fn clone(&self) -> Self {
+        Self {
+            sender: self.sender.clone(),
+        }
+    }
 }
 
 impl<T> UnboundedBufferChannelWriter<T> {
@@ -965,7 +974,7 @@ mod tests {
             stream.try_write(vec![i as u8]).unwrap();
         }
 
-        let mut stream_reader = stream.aquire_reader().unwrap();
+        let mut stream_reader = stream.acquire_reader().unwrap();
         stream.close();
         let result = stream_reader.read().await;
         assert!(result.is_ok());
@@ -1010,7 +1019,7 @@ mod tests {
             channel.try_write(vec![i as u8]).unwrap();
         }
 
-        let mut reader = channel.aquire_reader().unwrap();
+        let mut reader = channel.acquire_reader().unwrap();
         assert_eq!(reader.try_read().unwrap(), vec![0]);
         assert_eq!(reader.try_read().unwrap(), vec![1]);
         assert_eq!(reader.try_read().unwrap(), vec![2]);
@@ -1025,7 +1034,7 @@ mod tests {
             channel.try_write(vec![i as u8]).unwrap();
         }
 
-        let mut reader = channel.aquire_reader().unwrap();
+        let mut reader = channel.acquire_reader().unwrap();
         assert_eq!(reader.read().await.unwrap(), vec![0]);
         assert_eq!(reader.read().await.unwrap(), vec![1]);
         assert_eq!(reader.read().await.unwrap(), vec![2]);
@@ -1041,7 +1050,7 @@ mod tests {
             channel.try_write(vec![i as u8]).unwrap();
         }
 
-        let mut reader = channel.aquire_reader().unwrap();
+        let mut reader = channel.acquire_reader().unwrap();
         // Read just a few to verify
         assert_eq!(reader.read().await.unwrap(), vec![0]);
         assert_eq!(reader.read().await.unwrap(), vec![1]);
@@ -1057,7 +1066,7 @@ mod tests {
             writer.try_write(vec![i as u8]).unwrap();
         }
 
-        let mut reader = channel.aquire_reader().unwrap();
+        let mut reader = channel.acquire_reader().unwrap();
         assert_eq!(reader.try_read().unwrap(), vec![0]);
         assert_eq!(reader.try_read().unwrap(), vec![1]);
         assert_eq!(reader.try_read().unwrap(), vec![2]);

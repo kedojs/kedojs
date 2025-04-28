@@ -192,7 +192,7 @@ pub struct HttpRequest {
     pub keep_alive: bool,
     pub redirect: RequestRedirect,
     pub redirect_count: u32,
-    pub body: RequestBody,
+    pub stream: Option<IncomingBodyStream>,
 }
 
 impl HttpRequest {
@@ -205,11 +205,6 @@ impl HttpRequest {
         let redirect = RequestRedirect::Follow; // TODO: Handle redirects
         let redirect_count = 0; // TODO: Handle redirect count
 
-        let body = RequestBody::Stream(Some(StreamDecoder::detect_from_headers(
-            IncomingBodyStream::new(parts.1).into(),
-            &headers,
-        )));
-
         HttpRequest {
             method,
             uri,
@@ -217,7 +212,7 @@ impl HttpRequest {
             keep_alive,
             redirect,
             redirect_count,
-            body,
+            stream: Some(IncomingBodyStream::new(parts.1)),
         }
     }
 
@@ -226,15 +221,27 @@ impl HttpRequest {
     }
 
     pub fn keep_alive(&self) -> bool {
-        false
+        self.keep_alive
     }
 
     pub fn uri(&self) -> &Uri {
         &self.uri
     }
 
+    pub fn headers(&self) -> &hyper::header::HeaderMap {
+        &self.headers
+    }
+
     pub fn body(&mut self) -> RequestBody {
-        self.body.take()
+        let stream = self.stream.take();
+        if self.stream.is_none() {
+            return RequestBody::None;
+        }
+
+        RequestBody::Stream(Some(StreamDecoder::detect_from_headers(
+            stream.unwrap(),
+            &self.headers,
+        )))
     }
 }
 

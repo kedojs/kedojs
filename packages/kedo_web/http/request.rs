@@ -209,7 +209,7 @@ fn op_http_request_headers(
     _: JSObject,
     request: JSObject,
 ) -> JSResult<JSValue> {
-    let client = downcast_ref::<FetchRequest>(&request);
+    let client = downcast_ref::<HttpRequest>(&request);
     let headers = match client {
         Some(client) => client.headers.into_value(&ctx)?,
         None => return Err(JSError::new_typ(&ctx, "[Op:Headers] Invalid request")?),
@@ -241,7 +241,7 @@ fn op_http_request_redirect(
     _: JSObject,
     request: JSObject,
 ) -> JSResult<JSValue> {
-    let client = downcast_ref::<FetchRequest>(&request);
+    let client = downcast_ref::<HttpRequest>(&request);
     let redirect = match client {
         Some(client) => client.redirect as u8,
         None => return Err(JSError::new_typ(&ctx, "[Op:Redirect] Invalid request")?),
@@ -257,7 +257,7 @@ fn op_http_request_redirect_count(
     _: JSObject,
     request: JSObject,
 ) -> JSResult<JSValue> {
-    let client = downcast_ref::<FetchRequest>(&request);
+    let client = downcast_ref::<HttpRequest>(&request);
     let redirect_count = match client {
         Some(client) => client.redirect_count,
         None => {
@@ -278,6 +278,7 @@ fn op_http_request_body(
     _: JSObject,
     request: JSObject,
 ) -> JSResult<JSValue> {
+    // println!("[Kevin] - op_http_request_body: Body");
     let client = downcast_ref::<HttpRequest>(&request);
     let mut client = match client {
         Some(client) => client,

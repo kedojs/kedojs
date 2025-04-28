@@ -1,5 +1,5 @@
 use crate::http::body::HttpBody;
-use futures::{channel::oneshot, FutureExt as _, Stream, TryFutureExt};
+use futures::{channel::oneshot, FutureExt as _, Stream};
 use hyper::{body::Incoming, service::Service, Request, Response};
 use std::{borrow::BorrowMut, future::Future, net::ToSocketAddrs, pin::Pin, sync::Arc};
 use thiserror::Error;
@@ -143,7 +143,6 @@ impl Service<Request<Incoming>> for HttpService {
     fn call(&self, req: Request<Incoming>) -> Self::Future {
         let (sender, receiver) = oneshot::channel::<Response<HttpBody>>();
         let sender_clone = self.sender.clone();
-
         Box::pin(async move {
             sender_clone
                 .send(RequestEvent {
@@ -271,29 +270,15 @@ impl HttpServer {
     async fn accept_https_connection(
         stream: tokio_rustls::server::TlsStream<tokio::net::TcpStream>,
         serv_clone: HttpService,
-        ref mut shutdown_receiver: watch::Receiver<()>,
     ) {
         let stream = hyper_util::rt::TokioIo::new(Box::pin(stream));
         let executor = hyper_util::rt::TokioExecutor::new();
         let conn = hyper_util::server::conn::auto::Builder::new(executor)
             .serve_connection_with_upgrades(stream, serv_clone)
             .into_owned();
-        tokio::pin!(conn);
 
-        tokio::select! {
-            connection = conn.as_mut() => {
-                match connection {
-                    Ok(_) => {},
-                    Err(_) => {
-                        // eprintln!("Error accepting connection: {:?}", e);
-                    }
-                }
-            },
-            _ = shutdown_receiver.changed() => {
-                conn.as_mut().graceful_shutdown();
-                return;
-            }
-        }
+        tokio::pin!(conn);
+        let _ = conn.as_mut().await;
     }
 
     async fn accept_http_connection(
@@ -303,33 +288,20 @@ impl HttpServer {
         let stream = hyper_util::rt::TokioIo::new(Box::pin(stream));
         let rt = hyper_util::rt::TokioExecutor::new();
         let builder = hyper_util::server::conn::auto::Builder::new(rt);
-        let conn = builder.serve_connection_with_upgrades(stream, serv_clone);
+        let conn = builder.serve_connection_with_upgrades(
+            stream,
+            serv_clone.clone(),
+            // service_fn(move |req| {
+            //     let serv_clone = serv_clone.clone();
+            //     async move { serv_clone.call(req).await }
+            // }),
+        );
         tokio::pin!(conn);
 
         let _ = conn.as_mut().await;
-
-        // tokio::select! {
-        //     connection = conn.as_mut() => {
-        //         match connection {
-        //             Ok(_) => {},
-        //             Err(_) => {
-        //                 // eprintln!("Error accepting connection: {:?}", e);
-        //             }
-        //         }
-        //     },
-        //     _ = shutdown_receiver.changed() => {
-        //         conn.as_mut().graceful_shutdown();
-        //         return;
-        //     }
-        // }
     }
 
-    fn accept_connection(
-        &self,
-        stream: tokio::net::TcpStream,
-        serv_clone: HttpService,
-        shutdown_receiver: watch::Receiver<()>,
-    ) {
+    fn accept_connection(&self, stream: tokio::net::TcpStream, serv_clone: HttpService) {
         let acceptor = self
             .acceptor
             .as_ref()
@@ -340,12 +312,7 @@ impl HttpServer {
                 Some(acceptor) => {
                     // TODO: handle error
                     let stream = acceptor.accept(stream).await.unwrap();
-                    HttpServer::accept_https_connection(
-                        stream,
-                        serv_clone,
-                        shutdown_receiver,
-                    )
-                    .await;
+                    HttpServer::accept_https_connection(stream, serv_clone).await;
                 }
                 None => {
                     HttpServer::accept_http_connection(stream, serv_clone).await;
@@ -372,7 +339,8 @@ impl HttpServer {
                             }
                         };
 
-                        self.accept_connection(stream, serv_clone, shutdown_receiver.clone());
+                        // stream.set_nodelay(true).unwrap();
+                        self.accept_connection(stream, serv_clone);
                         continue;
                     }
                     _ = tokio::signal::ctrl_c() => {

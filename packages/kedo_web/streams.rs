@@ -21,7 +21,7 @@ fn stream_reource_constructor(
     constructor: JSObject,
     args: &[JSValue],
 ) -> JSResult<JSValue> {
-    let high_water_mark = 160;
+    let high_water_mark = 164;
     // match args.get(0) {
     //     Some(arg) => arg.as_number()?,
     //     None => 64.0,
