@@ -1,9 +1,9 @@
 use crate::http::response::FetchResponseExt;
 use crate::stream_codec::op_read_decoded_stream;
-use crate::{http::request::FetchRequestExt, signals::InternalSignal};
+use crate::{http::request::HttpRequestExt, signals::InternalSignal};
 use kedo_core::{define_exports, downcast_state, enqueue_job, native_job};
 use kedo_macros::js_class;
-use kedo_std::{FetchClient, FetchError, FetchRequest};
+use kedo_std::{FetchClient, FetchError, HttpRequest};
 use kedo_utils::{downcast_ref, js_error, js_undefined};
 use rust_jsc::{callback, JSContext, JSError, JSObject, JSResult, JSValue};
 
@@ -43,7 +43,7 @@ fn op_internal_fetch(
     callback: JSObject,
 ) -> JSResult<JSValue> {
     callback.protect();
-    let request = FetchRequest::from_value(&request_arg, &ctx)?;
+    let request = HttpRequest::from_value(&request_arg, &ctx)?;
     let signal = request_arg.as_object()?.get_property("signal")?;
     let mut internal_signal = None;
     if !signal.is_undefined() && signal.is_object() {

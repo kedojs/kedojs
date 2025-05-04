@@ -1,4 +1,19 @@
 const encoder = new TextEncoder();
+
+async function readFiles() {
+    const random = `${Math.random()}-${Math.random()}-${new Date().getTime()}`;
+    const content = await Deno.readTextFile(
+        "/Users/kcaicedo/Documents/Projects/kedojs/local/examples/fs/data.txt",
+    );
+    await Deno.writeTextFile(
+        `/Users/kcaicedo/Documents/Projects/kedojs/local/examples/mocks/data-${random}.txt`,
+        content,
+    );
+    await Deno.remove(
+        `/Users/kcaicedo/Documents/Projects/kedojs/local/examples/mocks/data-${random}.txt`,
+    );
+}
+
 async function testServerListen() {
     // Test 1: Passing URLSearchParams as the body
     Deno.serve(
@@ -8,6 +23,7 @@ async function testServerListen() {
         },
         async (req) => {
             // const body = "Hello, World!\n";
+            // await readFiles();
             const body = new ReadableStream({
                 type: "bytes",
                 start(controller) {

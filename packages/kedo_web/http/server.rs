@@ -7,7 +7,7 @@ use futures::Stream;
 use kedo_core::{downcast_state, enqueue_job, native_job, ClassTable, NativeJob};
 use kedo_macros::js_class;
 use kedo_std::{
-    FetchResponse, HttpRequest, HttpServerBuilder, HttpSocketAddr, RequestEvent,
+    HttpRequest, HttpResponse, HttpServerBuilder, HttpSocketAddr, RequestEvent,
     RequestEventSender, RequestReceiver, ServerHandle, StreamError,
     UnboundedBufferChannel, UnboundedBufferChannelReader, UnboundedBufferChannelWriter,
 };
@@ -629,7 +629,7 @@ fn op_send_event_response(
     sender: JSObject,
     response: JSObject,
 ) -> JSResult<JSValue> {
-    let fetch_response = FetchResponse::from_object(&ctx, &response)?;
+    let fetch_response = HttpResponse::from_object(&ctx, &response)?;
     let http_response = match fetch_response.try_into() {
         Ok(response) => response,
         Err(err) => return Err(JSError::new_typ(&ctx, format!("{}", err))?)?,

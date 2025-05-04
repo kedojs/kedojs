@@ -43,6 +43,14 @@ impl IncomingBodyStream {
     pub fn new(incoming: Incoming) -> Self {
         IncomingBodyStream(incoming)
     }
+
+    #[cfg(test)]
+    pub fn new_test() -> Self {
+        unsafe {
+            let incoming = std::mem::zeroed();
+            IncomingBodyStream(incoming)
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -81,6 +89,36 @@ impl Stream for InternalBodyStream {
 impl InternalBodyStream {
     pub fn new(stream: BoundedBufferChannelReader<Vec<u8>>) -> Self {
         InternalBodyStream(stream)
+    }
+}
+
+impl Body for InternalBodyStream {
+    type Data = bytes::Bytes;
+    type Error = FetchError;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<hyper::body::Frame<Self::Data>, Self::Error>>>
+    {
+        let this = std::pin::Pin::into_inner(self);
+
+        loop {
+            break match Pin::new(&mut this.0).poll_next(cx) {
+                std::task::Poll::Ready(Some(chunk)) => {
+                    if !chunk.is_empty() {
+                        let data = Bytes::from(chunk);
+                        break std::task::Poll::Ready(Some(Ok(
+                            hyper::body::Frame::data(data),
+                        )));
+                    }
+
+                    continue;
+                }
+                std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
+                std::task::Poll::Pending => std::task::Poll::Pending,
+            };
+        }
     }
 }
 

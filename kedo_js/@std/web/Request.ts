@@ -42,21 +42,18 @@ type InnerRequest = {
     // byte sequence or extracted body or null
     body: Uint8Array | ExtractedBody | null;
     keepalive: boolean;
-    priority: RequestPriority;
+    // priority: RequestPriority;
     origin: string;
     referrer: string;
-    referrerPolicy: ReferrerPolicy;
+    // referrerPolicy: ReferrerPolicy;
     mode: RequestMode;
     useCORSPreflightFlag?: boolean;
     redirect: RequestRedirect;
     cache: RequestCache;
-    integrity: string;
-    credentials: RequestCredentials;
-    initiatorType?: "fetch";
+    // integrity: string;
     urlList: URL[];
     currentURL: URL;
     redirectCount: number;
-    responseTainting: ResponseTainting;
     done?: boolean;
     timingAllowFailedFlag?: boolean;
 };
@@ -72,22 +69,17 @@ const defaultInnerRequest = (parsedURL: URL): InnerRequest => {
         header_list: [],
         body: null,
         keepalive: false,
-        priority: "auto",
+        // priority: "auto",
         origin: "client",
         referrer: "client",
-        referrerPolicy: "",
         mode: "no-cors",
         redirect: "follow",
         cache: "default",
-        initiatorType: "fetch",
-        integrity: "",
-        credentials: "same-origin",
         urlList: [new URL(parsedURL.href)],
         get currentURL() {
             return this.urlList[this.urlList.length - 1];
         },
         redirectCount: 0,
-        responseTainting: "basic",
     };
 };
 
@@ -126,7 +118,7 @@ class Request {
             header_list: [...request.header_list],
             unsafeRequestFlag: false,
             urlList: [...request.urlList],
-            initiatorType: "fetch",
+            // initiatorType: "fetch",
         };
 
         // 13. If init is not empty, then:
@@ -138,7 +130,7 @@ class Request {
 
             request.origin = "client";
             request.referrer = "client";
-            request.referrerPolicy = "";
+            // request.referrerPolicy = "";
             request.url = request.currentURL;
             request.urlList = [request.url];
         }
@@ -154,13 +146,13 @@ class Request {
             }
         }
 
-        request.referrerPolicy = init?.referrerPolicy ?? request.referrerPolicy;
+        // request.referrerPolicy = init?.referrerPolicy ?? request.referrerPolicy;
 
         let mode = init?.mode ?? fallbackMode ?? "cors";
         if (request.mode === "navigate") throw new TypeError("Invalid mode.");
         request.mode = mode;
 
-        request.credentials = init?.credentials ?? request.credentials;
+        // request.credentials = init?.credentials ?? request.credentials;
         request.cache = init?.cache ?? request.cache;
         if (
             request.cache === "only-if-cached" &&
@@ -170,7 +162,7 @@ class Request {
         }
 
         request.redirect = init?.redirect ?? request.redirect;
-        request.integrity = init?.integrity ?? request.integrity;
+        // request.integrity = init?.integrity ?? request.integrity;
         if (init?.keepalive !== undefined) {
             request.keepalive = init.keepalive;
         }
@@ -187,7 +179,7 @@ class Request {
             signal = init.signal as AbortSignal;
         }
 
-        request.priority = init?.priority ?? request.priority;
+        // request.priority = init?.priority ?? request.priority;
         this[_request] = request;
         if (signal) {
             this[_signal] = createDependentAbortSignal([signal]);
@@ -222,7 +214,7 @@ class Request {
         // 37. If init["body"] exists and is non-null, then:
         if (init?.body !== undefined && init.body !== null) {
             // 37.1. Let bodyWithType be the result of extracting init["body"], with keepalive set to request’s keepalive.
-            const bodyWithType = extractBody(init.body, request.keepalive);
+            const bodyWithType = extractBody(init.body as any, request.keepalive);
             // 37.2. Set initBody to bodyWithType.body.
             initBody = bodyWithType.body as any;
             // 37.3. Let type be bodyWithType’s type.
@@ -290,16 +282,8 @@ class Request {
         return this[_request].referrer;
     }
 
-    get referrerPolicy(): ReferrerPolicy {
-        return this[_request].referrerPolicy;
-    }
-
     get mode(): RequestMode {
         return this[_request].mode;
-    }
-
-    get credentials(): RequestCredentials {
-        return this[_request].credentials;
     }
 
     get cache(): RequestCache {
@@ -308,10 +292,6 @@ class Request {
 
     get redirect(): RequestRedirect {
         return this[_request].redirect;
-    }
-
-    get integrity(): string {
-        return this[_request].integrity;
     }
 
     get keepalive(): boolean {
@@ -405,48 +385,36 @@ class InnerRequestResource {
         return this.#body;
     }
 
-    get priority(): RequestPriority {
-        return "auto";
-    }
     get origin() {
         return "client";
     }
+
     get referrer() {
         return "client";
     }
-    get referrerPolicy(): ReferrerPolicy {
-        return "";
-    }
+
     get mode(): RequestMode {
         return "cors";
     }
+
     get useCORSPreflightFlag() {
         return false;
     }
+
     get redirect(): RequestRedirect {
         return "follow";
     }
+
     get cache(): RequestCache {
         return "default";
     }
 
-    get integrity() {
-        return "";
-    }
-    get credentials(): RequestCredentials {
-        return "same-origin";
-    }
-    get initiatorType(): "fetch" {
-        return "fetch"
-    }
     get urlList() {
         return [this.url];
     }
+
     get currentURL() {
         return this.url;
-    }
-    get responseTainting(): ResponseTainting {
-        return "basic";
     }
 }
 

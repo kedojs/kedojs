@@ -42,6 +42,7 @@ percent-encoding = "2.3.1"
 thiserror = "2.0.3"
 tokio-rustls = "0.26.2"
 tokio-native-tls = "0.3.1"
+# socket2 = "0.5.9"
 
 # packages dependencies
 kedo_runtime = { path = "./packages/kedo_runtime" }
@@ -53,3 +54,12 @@ kedo_fs = { path = "./packages/kedo_fs" }
 kedo_macros = { path = "./packages/kedo_macros" }
 kedo_std = { path = "./packages/kedo_std" }
 kedo_web = { path = "./packages/kedo_web" }
+
+#[profile.release]
+#opt-level = 3 # OR keep 3 for speed; "z" for size-optimized
+#lto = true
+#strip = true
+#debug = false
+#overflow-checks = false
+#panic = "abort"
+#codegen-units = 1

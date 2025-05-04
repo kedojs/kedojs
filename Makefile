@@ -17,7 +17,7 @@ build:
 	(cargo build --manifest-path ./cli/Cargo.toml)
 
 release:
-	(cargo build --release --manifest-path ./cli/Cargo.toml)
+	(RUSTFLAGS='-Cforce-frame-pointers=yes' cargo build --release --manifest-path ./cli/Cargo.toml)
 
 build-lib:
 	(cargo build)

@@ -4,19 +4,22 @@ use bytes::Bytes;
 use hyper::Uri;
 use kedo_core::downcast_state;
 use kedo_std::{
-    BoundedBufferChannel, FetchResponse, HeadersMap, InternalBodyStream, ResponseBody,
-    StreamDecoder, StreamEncoder,
+    BoundedBufferChannel, HttpResponse, InternalBodyStream, ResponseBody, StreamDecoder,
+    StreamEncoder,
 };
 use kedo_utils::downcast_ref;
 use rust_jsc::{JSArray, JSContext, JSError, JSObject, JSResult, JSTypedArray, JSValue};
 use std::str::FromStr;
 
 pub trait ResponseBodyExt {
-    fn from_value(headers: &HeadersMap, object: &JSObject) -> JSResult<ResponseBody>;
+    fn from_value(
+        headers: &hyper::HeaderMap,
+        object: &JSObject,
+    ) -> JSResult<ResponseBody>;
 }
 
 impl ResponseBodyExt for ResponseBody {
-    fn from_value(headers: &HeadersMap, object: &JSObject) -> JSResult<Self> {
+    fn from_value(headers: &hyper::HeaderMap, object: &JSObject) -> JSResult<Self> {
         if object.has_property("source") {
             let source = object.get_property("source")?.as_object()?;
             let buffer = JSTypedArray::from(source);
@@ -45,37 +48,37 @@ impl ResponseBodyExt for ResponseBody {
     }
 }
 
-pub trait FetchResponseExt {
+pub trait FetchResponseExt<T> {
     fn to_value(self, ctx: &JSContext) -> JSResult<JSValue>;
-    fn from_object(ctx: &JSContext, value: &JSObject) -> JSResult<FetchResponse>;
-    fn from_args(ctx: &JSContext, args: &[JSValue]) -> JSResult<FetchResponse>;
+    fn from_object(ctx: &JSContext, value: &JSObject) -> JSResult<T>;
 }
 
-impl FetchResponseExt for FetchResponse {
-    fn to_value(self, ctx: &JSContext) -> JSResult<JSValue> {
+impl FetchResponseExt<Self> for HttpResponse {
+    fn to_value(mut self, ctx: &JSContext) -> JSResult<JSValue> {
         let state = downcast_state(ctx);
 
         let value = JSObject::new(ctx);
         let urls = JSArray::new_array(
             ctx,
             &self
-                .urls
+                .urls()
                 .iter()
                 .map(|url| JSValue::string(ctx, url.to_string()))
                 .collect::<Vec<JSValue>>(),
         )?;
 
-        let status = JSValue::number(ctx, self.status as f64);
-        let status_message = JSValue::string(ctx, self.status_message);
+        let status = JSValue::number(ctx, self.status().as_u16() as f64);
+        let status_message =
+            JSValue::string(ctx, self.status().canonical_reason().unwrap_or(""));
 
         value.set_property("urls", &urls, Default::default())?;
         value.set_property("status", &status, Default::default())?;
         value.set_property("status_message", &status_message, Default::default())?;
 
-        let headers = self.headers.into_value(ctx)?;
+        let headers = self.headers().into_value(ctx)?;
         value.set_property("headers", &headers, Default::default())?;
 
-        match self.body {
+        match self.take_body() {
             ResponseBody::Bytes(_) => todo!(),
             ResponseBody::DecodedStream(stream_decoder) => {
                 let decoded_stream_class = state
@@ -103,7 +106,7 @@ impl FetchResponseExt for FetchResponse {
         Ok(value.into())
     }
 
-    fn from_object(ctx: &JSContext, value: &JSObject) -> JSResult<FetchResponse> {
+    fn from_object(ctx: &JSContext, value: &JSObject) -> JSResult<HttpResponse> {
         let url: String = value.get_property("url")?.as_string()?.to_string();
         let url = match Uri::from_str(url.as_str()) {
             Ok(url) => url,
@@ -111,56 +114,18 @@ impl FetchResponseExt for FetchResponse {
         };
 
         let status = value.get_property("status")?.as_number()? as u16;
-        let status_message = value
-            .get_property("status_message")?
-            .as_string()?
-            .to_string();
-
         let headers = JSArray::new(value.get_property("headers")?.as_object()?);
-        let headers_map = HeadersMap::from_array(headers)?;
-        let body = ResponseBody::from_value(&headers_map, value)?;
+        let headers = hyper::header::HeaderMap::from_array(headers)?;
+        let body = ResponseBody::from_value(&headers, value)?;
 
-        Ok(FetchResponse {
-            urls: vec![url],
-            status,
-            status_message,
-            headers: headers_map,
-            aborted: false,
-            body,
-        })
-    }
-
-    /// Create a new FetchResponse from JS arguments
-    /// Arguments:
-    /// 0: url: string
-    /// 1: status: number
-    /// 2: status_message: string
-    /// 3: headers: Headers
-    /// 4: body: Body
-    /// Returns: FetchResponse
-    fn from_args(ctx: &JSContext, args: &[JSValue]) -> JSResult<FetchResponse> {
-        let url: String = args[0].as_string()?.to_string();
-        let url = match Uri::from_str(url.as_str()) {
-            Ok(url) => url,
-            Err(_) => return Err(JSError::new_typ(&ctx, "Invalid URL")?),
+        let builder = match HttpResponse::builder().status_code(status) {
+            Ok(builder) => builder,
+            Err(e) => return Err(JSError::new_typ(ctx, e.to_string())?),
         };
-
-        let status = args[1].as_number()? as u16;
-
-        let headers = JSArray::new(args[3].as_object()?);
-        let headers_map = HeadersMap::from_array(headers)?;
-        let body = match args.get(4) {
-            Some(body) => ResponseBody::from_value(&headers_map, &body.as_object()?)?,
-            None => ResponseBody::None,
+        let response = match builder.headers(headers).body(body).url(url).build() {
+            Ok(response) => response,
+            Err(e) => return Err(JSError::new_typ(ctx, e.to_string())?),
         };
-
-        Ok(FetchResponse {
-            urls: vec![url],
-            status,
-            status_message: "".to_string(),
-            headers: headers_map,
-            aborted: false,
-            body,
-        })
+        Ok(response)
     }
 }

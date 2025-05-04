@@ -1,12 +1,32 @@
 import { serve } from "bun";
+import { readFile, rm, writeFile } from "node:fs/promises";
 
 const port = 3000;
 const encoder = new TextEncoder();
+
+async function readFiles() {
+    const random = `${Math.random()}-${Math.random()}-${new Date().getTime()}`;
+    const content = await readFile(
+        "/Users/kcaicedo/Documents/Projects/kedojs/local/examples/fs/data.txt",
+        { encoding: "utf8" },
+    );
+
+    await writeFile(
+        `/Users/kcaicedo/Documents/Projects/kedojs/local/examples/mocks/data-bun-${random}.txt`,
+        content,
+    );
+
+    await rm(
+        `/Users/kcaicedo/Documents/Projects/kedojs/local/examples/mocks/data-bun-${random}.txt`,
+    );
+}
 
 serve({
     port,
     async fetch(request) {
         // stream
+        // const body = "Hello, World!\n";
+        // await readFiles();
         const body = new ReadableStream({
             type: "bytes",
             start(controller) {

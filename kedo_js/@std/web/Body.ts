@@ -16,11 +16,9 @@ class InternalBody {
     private _body: ReadableStream | null;
     private _source?: Uint8Array;
     private _consumed?: boolean;
-    // private _headers: Headers;
 
     constructor(body: ReadableStream | Uint8Array | null, consumed = false) {
         this._body = null;
-        // this._headers = headers;
         this._consumed = consumed;
 
         if (body instanceof Uint8Array) {
@@ -60,12 +58,12 @@ class InternalBody {
     //     - 3.3. read all the bytes from the reader and add them to the queue
     // - 4. resolve the prmise with the result of converting the queue into a javascript value
     private async consumeBody(): Promise<Uint8Array> {
-        if (this.bodyUsed || this._consumed) {
+        if (this._consumed || this.bodyUsed) {
             throw new TypeError("Body has already been consumed.");
         }
 
         if (this.body === null) {
-            return new Uint8Array();
+            return new Uint8Array(0);
         }
 
         // 1. If object is unusable, then return a promise rejected with a TypeError.
@@ -74,25 +72,25 @@ class InternalBody {
         }
 
         const reader = this.body.getReader<ReadableStreamDefaultReader>();
-        const chunks: Uint8Array[] = [];
-        let done: boolean | undefined = false;
+        this._consumed = true;
 
-        while (!done) {
+        const chunks: Uint8Array[] = [];
+        let totalLength = 0;
+
+        while (true) {
             // Allocate a new buffer (e.g., 1KB) for each read
             // TODO: Use a more efficient way to read the stream
             // const buffer = new Uint8Array(1024);
-            const { value, done: readerDone } = await reader.read();
+            const { value, done } = await reader.read();
+            if (done) break;
+
             if (value && value.byteLength > 0) {
+                totalLength += value.byteLength;
                 chunks.push(value);
             }
-            done = readerDone;
         }
 
         // Combine all chunks into a single Uint8Array
-        const totalLength = chunks.reduce(
-            (sum, chunk) => sum + chunk.byteLength,
-            0,
-        );
         const result = new Uint8Array(totalLength);
         let offset = 0;
 
@@ -129,11 +127,6 @@ class InternalBody {
         const bytes = await this.consumeBody();
         return new TextDecoder("utf-8").decode(bytes);
     }
-
-    // getMimeType(): string | null {
-    //     const contentType = this._headers.get("content-type");
-    //     return contentType;
-    // }
 }
 
 const encoder = new TextEncoder();
@@ -163,43 +156,29 @@ function extractBody(
         }
 
         stream = object;
-    }
-    // else {
-    //     stream = new ReadableStream({ type: "bytes" });
-    // }
-
-    // assert(stream instanceof ReadableStream);
-
-    if (object instanceof ArrayBuffer || ArrayBuffer.isView(object)) {
-        // Byte sequence or BufferSource
-        if (object instanceof ArrayBuffer) {
-            source = new Uint8Array(object).slice();
-        } else {
-            source = new Uint8Array(
-                object.buffer,
-                object.byteOffset,
-                object.byteLength,
-            ).slice();
-        }
-    } else if (object instanceof URLSearchParams) {
-        // URLSearchParams
-        source = encoder.encode(object.toString());
-        type = "application/x-www-form-urlencoded;charset=UTF-8";
     } else if (typeof object === "string") {
         // Scalar value string
         source = encoder.encode(object);
         type = "text/plain;charset=UTF-8";
-    } else if (!isReadableStream(object)) {
+    } else if (object instanceof ArrayBuffer) {
+        source = new Uint8Array(object).slice();
+        length = object.byteLength;
+        type = "application/octet-stream";
+    } else if (ArrayBuffer.isView(object)) {
+        source = new Uint8Array(
+            object.buffer,
+            object.byteOffset,
+            object.byteLength,
+        ).slice();
+        length = object.byteLength;
+        type = "application/octet-stream";
+    } else if (object instanceof URLSearchParams) {
+        // URLSearchParams
+        source = encoder.encode(object.toString());
+        type = "application/x-www-form-urlencoded;charset=UTF-8";
+    } else {
         throw new TypeError("Invalid body type");
     }
-
-    // if (ArrayBuffer.isView(source)) {
-    //     length = source.byteLength;
-    //     // if (!isErrored(stream as any)) {
-    //     //   readableStreamEnqueue(stream as any, source);
-    //     //   readableStreamCloseByteController(stream as any);
-    //     // }
-    // }
 
     const body: ExtractedBody = { stream, source, length, type };
     return { body, type };

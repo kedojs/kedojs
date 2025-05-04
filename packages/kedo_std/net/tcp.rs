@@ -80,7 +80,7 @@ impl TcpListener {
         socket.set_nodelay(options.nodelay)?;
         socket.set_keepalive(options.keepalive)?;
 
-        let listener = socket.listen(10024)?;
+        let listener = socket.listen(1024)?;
 
         // Set the TTL if specified
         if let Some(ttl) = options.ttl {
@@ -99,16 +99,7 @@ impl TcpListener {
 
     /// Accept a new connection
     pub async fn accept(&self) -> io::Result<(TcpStream, SocketAddr)> {
-        let (stream, addr) = self.listener.accept().await?;
-
-        // Apply connection-specific options
-        // stream.set_nodelay(self.options.nodelay)?;
-
-        // if let Some(ttl) = self.options.ttl {
-        //     stream.set_ttl(ttl)?;
-        // }
-
-        Ok((stream, addr))
+        return self.listener.accept().await;
     }
 
     /// Get the local address this listener is bound to
@@ -169,97 +160,6 @@ impl TcpConnection {
     }
 }
 
-// pub struct TcpConnManager {
-//     listener: TcpListener,
-//     shutdown_rx: tokio::sync::oneshot::Receiver<()>,
-//     stream_tx: tokio::sync::mpsc::UnboundedSender<tokio::net::TcpStream>,
-// }
-
-// pub struct TcpConnManagerHandle {
-//     shutdown_tx: tokio::sync::oneshot::Sender<()>,
-//     stream_rx: tokio::sync::mpsc::UnboundedReceiver<tokio::net::TcpStream>,
-// }
-
-// pub struct TcpConnManagerBuilder {
-//     listener: Option<TcpListener>,
-//     shutdown_rx: Option<tokio::sync::oneshot::Receiver<()>>,
-//     stream_tx: Option<tokio::sync::mpsc::UnboundedSender<tokio::net::TcpStream>>,
-// }
-
-// impl TcpConnManagerBuilder {
-//     pub fn new() -> Self {
-//         Self {
-//             listener: None,
-//             shutdown_rx: None,
-//             stream_tx: None,
-//         }
-//     }
-
-//     pub fn listener(mut self, listener: TcpListener) -> Self {
-//         self.listener = Some(listener);
-//         self
-//     }
-
-//     pub fn build(self) -> (TcpConnManager, TcpConnManagerHandle) {
-//         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
-//         let (stream_tx, stream_rx) = tokio::sync::mpsc::unbounded_channel();
-//         let handle = TcpConnManagerHandle {
-//             shutdown_tx,
-//             stream_rx,
-//         };
-//         let listener = self.listener.unwrap();
-//         let manager = TcpConnManager {
-//             listener,
-//             shutdown_rx,
-//             stream_tx,
-//         };
-//         (manager, handle)
-//     }
-// }
-
-// impl TcpConnManagerHandle {
-//     pub fn shutdown(self) {
-//         let _ = self.shutdown_tx.send(());
-//     }
-// }
-
-// impl TcpConnManagerHandle {
-//     pub fn poll_recv(
-//         &mut self,
-//         cx: &mut Context<'_>,
-//     ) -> Poll<Option<tokio::net::TcpStream>> {
-//         self.stream_rx.poll_recv(cx)
-//     }
-// }
-
-// impl Future for TcpConnManager {
-//     type Output = io::Result<()>;
-
-//     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-//         let this = self.get_mut();
-
-//         // Check if the shutdown signal has been received
-//         if let Poll::Ready(Ok(())) = Pin::new(&mut this.shutdown_rx).poll(cx) {
-//             return Poll::Ready(Ok(()));
-//         }
-//         // Poll the listener for incoming connections
-//         loop {
-//             match this.listener.poll_accept(cx) {
-//                 Poll::Ready(Ok((stream, _))) => {
-//                     if let Err(e) = this.stream_tx.send(stream) {
-//                         return Poll::Ready(Err(io::Error::new(
-//                             io::ErrorKind::Other,
-//                             e.to_string(),
-//                         )));
-//                     }
-//                 }
-//                 Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
-//                 Poll::Pending => return Poll::Pending,
-//             }
-//         }
-//     }
-// }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -310,45 +210,4 @@ mod tests {
         conn.stream.read_exact(&mut buf).await.unwrap();
         assert_eq!(&buf, b"pong");
     }
-
-    // #[tokio::test]
-    // async fn test_conn_manager() {
-    //     // Create a listener
-    //     let addr = "127.0.0.1:0".parse().unwrap();
-    //     let options = TcpOptions::default();
-    //     let listener = TcpListener::bind(addr, options).await.unwrap();
-    //     let server_addr = listener.local_addr().unwrap();
-
-    //     // Build the connection manager with the listener
-    //     let (manager, mut handle) =
-    //         TcpConnManagerBuilder::new().listener(listener).build();
-
-    //     // Spawn the manager to handle connections
-    //     let manager_handle = tokio::spawn(manager);
-
-    //     // Create a task to handle incoming connections from the manager
-    //     let connection_handler = tokio::spawn(async move {
-    //         if let Some(mut stream) = handle.stream_rx.recv().await {
-    //             let mut buf = [0u8; 4];
-    //             stream.read_exact(&mut buf).await.unwrap();
-    //             assert_eq!(&buf, b"ping");
-    //             stream.write_all(b"pong").await.unwrap();
-    //         }
-    //     });
-
-    //     // Connect to the server
-    //     let mut conn = TcpConnection::connect(server_addr, TcpOptions::default())
-    //         .await
-    //         .unwrap();
-    //     conn.stream.write_all(b"ping").await.unwrap();
-
-    //     let mut buf = [0u8; 4];
-    //     conn.stream.read_exact(&mut buf).await.unwrap();
-    //     assert_eq!(&buf, b"pong");
-
-    //     // Make sure all tasks are done
-    //     connection_handler.await.unwrap();
-    //     handle.shutdown_tx.send(()).unwrap();
-    //     manager_handle.await.unwrap().unwrap();
-    // }
 }

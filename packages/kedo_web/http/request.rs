@@ -4,9 +4,8 @@ use bytes::Bytes;
 use kedo_core::{define_exports, downcast_state};
 use kedo_macros::js_class;
 use kedo_std::{
-    BoundedBufferChannel, FetchError, FetchRequest, FetchRequestBuilder, HeadersMap,
-    HttpRequest, IncomingBodyStream, RequestBody, RequestEvent, RequestRedirect,
-    StreamDecoder,
+    BoundedBufferChannel, FetchError, HttpRequest, HttpRequestBuilder,
+    IncomingBodyStream, RequestBody, RequestEvent, RequestRedirect, StreamDecoder,
 };
 use kedo_utils::downcast_ref;
 use rust_jsc::{
@@ -14,38 +13,65 @@ use rust_jsc::{
 };
 use std::mem::ManuallyDrop;
 
-pub trait FetchRequestExt {
-    fn from_value(value: &JSValue, ctx: &JSContext) -> JSResult<FetchRequest>;
-    fn from_event(value: RequestEvent) -> Result<FetchRequest, FetchError>;
+pub trait HttpRequestExt {
+    fn from_value(value: &JSValue, ctx: &JSContext) -> JSResult<HttpRequest>;
+    fn from_event(value: RequestEvent) -> Result<HttpRequest, FetchError>;
 }
 
-impl FetchRequestExt for FetchRequest {
-    fn from_value(value: &JSValue, ctx: &JSContext) -> JSResult<FetchRequest> {
-        fetch_request_from_value(value, ctx)
+impl HttpRequestExt for HttpRequest {
+    fn from_value(value: &JSValue, ctx: &JSContext) -> JSResult<HttpRequest> {
+        if !value.is_object() {
+            return Err(JSError::new_typ(&ctx, "Request must be an object")?);
+        }
+
+        let request = value.as_object()?;
+        let method = request.get_property("method")?.as_string()?.to_string();
+        let url = request.get_property("url")?.as_string()?.to_string();
+        let redirect = request
+            .get_property("redirect")
+            .and_then(|v| Ok(RequestRedirect::from(v.as_number()? as u8)))
+            .unwrap_or(RequestRedirect::Follow);
+        let keep_alive = request
+            .get_property("keep_alive")
+            .and_then(|v| Ok(v.as_boolean()))
+            .unwrap_or(false);
+        let uri = url
+            .parse::<hyper::Uri>()
+            .map_err(|_| JSError::new_typ(&ctx, "Invalid URL").unwrap())?;
+        let header_list = request.get_property("header_list")?.as_object()?;
+
+        let headers = hyper::HeaderMap::from_array(JSArray::new(header_list))?;
+        let body = RequestBody::from_object(&request)?;
+        let request = HttpRequestBuilder::new()
+            .method(method)
+            .uri(uri)
+            .headers(headers)
+            .keep_alive(keep_alive)
+            .redirect(redirect)
+            .body(body)
+            .build()
+            .map_err(|e| JSError::new_typ(&ctx, e).unwrap())?;
+
+        Ok(request)
     }
 
-    fn from_event(value: RequestEvent) -> Result<FetchRequest, FetchError> {
-        let mut headers = HeadersMap::default();
-        for (name, value) in value.req.headers() {
-            let value_str = value.to_str();
-            if let Ok(value_str) = value_str {
-                headers.append(name.as_str(), value_str);
-            }
-        }
+    fn from_event(value: RequestEvent) -> Result<HttpRequest, FetchError> {
+        // Clone necessary parts before consuming the body
+        let method = value.req.method().clone();
+        let uri = value.req.uri().clone();
+        let headers = value.req.headers().clone();
 
         // check keep alive from headers
         let keep_alive = headers
             .get("connection")
-            .map(|value| value.to_lowercase() == "keep-alive")
+            .map(|value| value.to_str().unwrap_or("").to_lowercase() == "keep-alive")
             .unwrap_or(false);
 
-        let method = value.req.method().as_str().to_string();
-        let uri = value.req.uri().clone();
         let body_stream = IncomingBodyStream::new(value.req.into_body());
-        let decoded_body = StreamDecoder::detect(body_stream, &headers);
+        let decoded_body = StreamDecoder::detect_encoding(body_stream, &headers);
 
-        let request = FetchRequestBuilder::new()
-            .method(method)
+        let request = HttpRequestBuilder::new()
+            .method(method.to_string())
             .uri(uri)
             .headers(headers)
             .keep_alive(keep_alive)
@@ -116,47 +142,8 @@ impl RequestBodyExt for RequestBody {
     }
 }
 
-fn fetch_request_from_value(value: &JSValue, ctx: &JSContext) -> JSResult<FetchRequest> {
-    if !value.is_object() {
-        return Err(JSError::new_typ(&ctx, "Missing highWaterMark argument")?);
-    }
-
-    let request = value.as_object()?;
-    let method = request.get_property("method")?.as_string()?.to_string();
-    let url = request.get_property("url")?.as_string()?.to_string();
-    let redirect = request
-        .get_property("redirect")
-        .and_then(|v| Ok(RequestRedirect::from(v.as_number()? as u8)))
-        .unwrap_or(RequestRedirect::Follow);
-    let keep_alive = request
-        .get_property("keep_alive")
-        .and_then(|v| Ok(v.as_boolean()))
-        .unwrap_or(false);
-    let uri = url
-        .parse::<hyper::Uri>()
-        .map_err(|_| JSError::new_typ(&ctx, "Invalid URL").unwrap())?;
-    let header_list = request.get_property("header_list")?.as_object()?;
-    if !header_list.is_array() {
-        return Err(JSError::new_typ(&ctx, "header_list must be an array")?);
-    }
-
-    let headers = HeadersMap::from_array(JSArray::new(header_list))?;
-    let body = RequestBody::from_object(&request)?;
-    let request = FetchRequestBuilder::new()
-        .method(method)
-        .uri(uri)
-        .headers(headers)
-        .keep_alive(keep_alive)
-        .redirect(redirect)
-        .body(body)
-        .build()
-        .map_err(|e| JSError::new_typ(&ctx, e).unwrap())?;
-
-    Ok(request)
-}
-
 #[js_class(
-    resource = FetchRequest,
+    resource = HttpRequest,
 )]
 pub struct FetchRequestResource {}
 
@@ -211,7 +198,7 @@ fn op_http_request_headers(
 ) -> JSResult<JSValue> {
     let client = downcast_ref::<HttpRequest>(&request);
     let headers = match client {
-        Some(client) => client.headers.into_value(&ctx)?,
+        Some(client) => client.headers().into_value(&ctx)?,
         None => return Err(JSError::new_typ(&ctx, "[Op:Headers] Invalid request")?),
     };
 
@@ -242,8 +229,8 @@ fn op_http_request_redirect(
     request: JSObject,
 ) -> JSResult<JSValue> {
     let client = downcast_ref::<HttpRequest>(&request);
-    let redirect = match client {
-        Some(client) => client.redirect as u8,
+    let redirect: u8 = match client {
+        Some(client) => client.redirect().into(),
         None => return Err(JSError::new_typ(&ctx, "[Op:Redirect] Invalid request")?),
     };
 
@@ -259,7 +246,7 @@ fn op_http_request_redirect_count(
 ) -> JSResult<JSValue> {
     let client = downcast_ref::<HttpRequest>(&request);
     let redirect_count = match client {
-        Some(client) => client.redirect_count,
+        Some(client) => client.redirect_count(),
         None => {
             return Err(JSError::new_typ(
                 &ctx,
@@ -285,7 +272,7 @@ fn op_http_request_body(
         None => return Err(JSError::new_typ(&ctx, "[Op:Body] Invalid request")?),
     };
 
-    if let Some(object) = client.body().to_object(&ctx)? {
+    if let Some(object) = client.take_body().to_object(&ctx)? {
         return Ok(object.into());
     }
 

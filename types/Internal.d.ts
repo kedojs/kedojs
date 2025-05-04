@@ -9,7 +9,6 @@ type HttpResponse = {
     source?: Uint8Array;
     readonly headers: [string, string][];
     readonly status: number;
-    readonly status_message: string;
     readonly url: string;
 };
 

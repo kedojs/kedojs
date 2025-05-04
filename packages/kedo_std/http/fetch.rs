@@ -1,31 +1,26 @@
+use super::body::HttpBody;
 use super::errors::FetchError;
 use crate::http::body::IncomingBodyStream;
 use crate::http::decoder::StreamDecoder;
-use crate::http::headers::HeadersMap;
-use crate::http::request::{FetchRequest, RequestBody, RequestRedirect};
-use crate::http::response::{FetchResponse, ResponseBody};
+use crate::http::request::{HttpRequest, RequestBody, RequestRedirect};
+use crate::http::response::{HttpResponse, ResponseBody};
 use crate::http::utils::{basic_auth, extract_authority, remove_credentials};
 use futures::ready;
-use http_body_util::combinators::BoxBody;
-use http_body_util::{BodyExt, Either, Empty, Full};
+use http_body_util::{BodyExt, Empty, Full};
 use hyper::header::{
-    AUTHORIZATION, COOKIE, LOCATION, PROXY_AUTHORIZATION, WWW_AUTHENTICATE,
+    HeaderValue, AUTHORIZATION, COOKIE, LOCATION, PROXY_AUTHORIZATION, WWW_AUTHENTICATE,
 };
 use hyper::{Method, Request, StatusCode, Uri};
 use hyper_tls::HttpsConnector;
 use hyper_util::client::legacy::ResponseFuture;
 use hyper_util::client::legacy::{connect::HttpConnector, Client};
 use hyper_util::rt::TokioExecutor;
-use std::convert::Infallible;
 use std::error::Error;
 use std::fmt::Debug;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-
-type FetchBodyStream = StreamDecoder;
-type FetchBody = Either<FetchBodyStream, BoxBody<bytes::Bytes, Infallible>>;
 
 /// | ------------------------------- |
 /// |           FetchClient           |
@@ -37,50 +32,50 @@ type FetchBody = Either<FetchBodyStream, BoxBody<bytes::Bytes, Infallible>>;
 /// This is the main entry point for making HTTP requests.
 #[derive(Debug, Clone)]
 pub struct FetchClient {
-    hyper: Client<HttpsConnector<HttpConnector>, FetchBody>,
+    hyper: Client<HttpsConnector<HttpConnector>, HttpBody>,
     max_redirects: u32,
 }
 
-impl TryFrom<&mut FetchRequest> for Request<FetchBody> {
+impl TryFrom<&mut HttpRequest> for Request<HttpBody> {
     type Error = Box<dyn Error>;
 
-    fn try_from(fetch_request: &mut FetchRequest) -> Result<Self, Self::Error> {
-        let mut uri = fetch_request.uri.clone();
+    fn try_from(fetch_request: &mut HttpRequest) -> Result<Self, Self::Error> {
+        let mut uri = fetch_request.uri().clone();
         let auth = extract_authority(&uri);
         if let Some((username, password)) = auth {
             let basic_auth = basic_auth(username.as_str(), password.as_deref());
             fetch_request
-                .headers
-                .append(AUTHORIZATION.as_str(), basic_auth.as_str());
+                .headers_mut()
+                .append(AUTHORIZATION.as_str(), HeaderValue::from_str(&basic_auth)?);
             uri = remove_credentials(&uri);
         }
 
-        let mut builder = Request::builder()
-            .method(fetch_request.method.as_str())
-            .uri(uri);
-
-        // Set headers
-        for (name, value) in fetch_request.headers.into_inner() {
-            builder = builder.header(name.as_str(), value.as_str());
-        }
+        let builder = Request::builder().method(fetch_request.method()).uri(uri);
 
         // Set body
-        let body = match &mut fetch_request.body {
-            RequestBody::None => Either::Right(Empty::new().boxed()),
-            RequestBody::Bytes(bytes) => Either::Right(Full::new(bytes.clone()).boxed()),
+        let body = match fetch_request.body_mut() {
+            RequestBody::Bytes(bytes) => Full::new(bytes.clone())
+                .map_err(|_| FetchError::new("Http Full Body Error"))
+                .boxed(),
             RequestBody::Stream(stream) => match stream.take() {
-                Some(stream) => Either::Left(stream),
-                None => Either::Right(Empty::new().boxed()),
+                Some(stream) => stream.boxed(),
+                None => Empty::new()
+                    .map_err(|_| FetchError::new("Http Empty Body Error"))
+                    .boxed(),
             },
+            RequestBody::None => Empty::new()
+                .map_err(|_| FetchError::new("Http Empty Body Error"))
+                .boxed(),
         };
 
-        let request = builder.body(body)?;
+        let mut request = builder.body(body)?;
+        *request.headers_mut() = fetch_request.headers().clone();
         Ok(request)
     }
 }
 
 pub struct PendingRequest {
-    fetch_request: FetchRequest,
+    fetch_request: HttpRequest,
     in_flight: ResponseFuture,
     urls: Vec<Uri>,
     redirect_count: u32,
@@ -89,11 +84,13 @@ pub struct PendingRequest {
 
 impl PendingRequest {
     fn must_follow_redirect(&self) -> bool {
-        self.fetch_request.redirect == RequestRedirect::Follow
+        matches!(self.fetch_request.redirect(), RequestRedirect::Follow)
+        // self.fetch_request.redirect() == RequestRedirect::Follow
     }
 
     fn error_on_redirect(&self) -> bool {
-        self.fetch_request.redirect == RequestRedirect::Error
+        matches!(self.fetch_request.redirect(), RequestRedirect::Error)
+        // self.fetch_request.redirect == RequestRedirect::Error
     }
 
     fn too_many_redirects(&self) -> bool {
@@ -102,7 +99,7 @@ impl PendingRequest {
 }
 
 impl Future for PendingRequest {
-    type Output = Result<FetchResponse, FetchError>;
+    type Output = Result<HttpResponse, FetchError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let response =
@@ -118,7 +115,7 @@ impl Future for PendingRequest {
 
         if is_redirect && self.must_follow_redirect() {
             let is_see_other = response.status() == StatusCode::SEE_OTHER;
-            if self.fetch_request.body.is_none_stream() && !is_see_other {
+            if self.fetch_request.body_mut().is_none_stream() && !is_see_other {
                 return Poll::Ready(Err(FetchError {
                     message: "Redirect cannot be followed with stream body".into(),
                     inner: None,
@@ -129,7 +126,7 @@ impl Future for PendingRequest {
                 let location = location_header.to_str().map_err(FetchError::from)?;
                 let new_uri = self
                     .client
-                    .resolve_redirect(&self.fetch_request.uri, location)
+                    .resolve_redirect(&self.fetch_request.uri(), location)
                     .map_err(|error| FetchError {
                         message: error.to_string(),
                         inner: None,
@@ -138,13 +135,13 @@ impl Future for PendingRequest {
                 let fetch_request_mut = &mut self.fetch_request;
                 FetchClient::remove_sensitive_headers(fetch_request_mut, &new_uri);
 
-                self.fetch_request.uri = new_uri.clone();
+                self.fetch_request.set_uri(new_uri.clone());
                 self.urls.push(new_uri);
                 self.redirect_count += 1;
 
                 if is_see_other {
-                    self.fetch_request.method = Method::GET.to_string();
-                    self.fetch_request.body = RequestBody::None;
+                    self.fetch_request.set_method(Method::GET.to_string());
+                    self.fetch_request.set_body(RequestBody::None);
                 }
 
                 let hyper_request =
@@ -169,35 +166,23 @@ impl Future for PendingRequest {
             }));
         }
 
-        let status = response.status().as_u16();
-        let status_message = response
-            .status()
-            .canonical_reason()
-            .unwrap_or("")
-            .to_string();
-
-        let mut headers = HeadersMap::default();
-        for (name, value) in response.headers() {
-            headers.append(
-                name.as_str(),
-                value.to_str().map_err(|error| FetchError {
-                    message: "Invalid header value".into(),
-                    inner: Some(error.into()),
-                })?,
-            );
-        }
+        let status = response.status();
+        let headers = response.headers().clone();
 
         let body_stream = IncomingBodyStream::new(response.into_body());
-        let decoder_body = StreamDecoder::detect(body_stream, &headers);
+        let decoder_body = StreamDecoder::detect_encoding(body_stream, &headers);
         let decoder_body = ResponseBody::DecodedStream(decoder_body);
-        let fetch_response = FetchResponse {
-            urls: self.urls.clone(),
-            status,
-            status_message,
-            headers,
-            aborted: false,
-            body: decoder_body,
-        };
+        let fetch_response = HttpResponse::builder()
+            .status(status)
+            .headers(headers)
+            .body(decoder_body)
+            .aborted(false)
+            .urls(self.urls.clone())
+            .build()
+            .map_err(|e| FetchError {
+                message: "Failed to build fetch response".into(),
+                inner: Some(e.into()),
+            })?;
 
         Poll::Ready(Ok(fetch_response))
     }
@@ -225,9 +210,9 @@ impl FetchClient {
 
     pub fn execute(
         &self,
-        mut request: FetchRequest,
+        mut request: HttpRequest,
     ) -> Result<PendingRequest, FetchError> {
-        let urls = vec![request.uri.clone()];
+        let urls = vec![request.uri().clone()];
         let hyper_request = Request::try_from(&mut request).map_err(|e| FetchError {
             message: e.to_string(),
             inner: None,
@@ -272,15 +257,15 @@ impl FetchClient {
         Ok(new_uri)
     }
 
-    pub(crate) fn remove_sensitive_headers(request: &mut FetchRequest, next: &Uri) {
-        let previous = &request.uri;
+    pub(crate) fn remove_sensitive_headers(request: &mut HttpRequest, next: &Uri) {
+        let previous = &request.uri();
         // check host and port
         let cross_host = previous.host() != next.host() || previous.port() != next.port();
         if cross_host {
-            request.headers.remove(AUTHORIZATION.as_str());
-            request.headers.remove(COOKIE.as_str());
-            request.headers.remove(PROXY_AUTHORIZATION.as_str());
-            request.headers.remove(WWW_AUTHENTICATE.as_str());
+            request.headers_mut().remove(AUTHORIZATION.as_str());
+            request.headers_mut().remove(COOKIE.as_str());
+            request.headers_mut().remove(PROXY_AUTHORIZATION.as_str());
+            request.headers_mut().remove(WWW_AUTHENTICATE.as_str());
         }
     }
 }
@@ -288,7 +273,7 @@ impl FetchClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::http::request::FetchRequestBuilder;
+    use crate::http::request::HttpRequestBuilder;
     use crate::http::request::{RequestBody, RequestRedirect};
     use crate::http::tests::test_utils::start_test_server;
     use crate::BoundedBufferChannel;
@@ -310,7 +295,7 @@ mod tests {
 
     async fn handler_redirect(
         req: Request<body::Incoming>,
-    ) -> Result<Response<Full<Bytes>>, Infallible> {
+    ) -> Result<Response<Full<Bytes>>, std::convert::Infallible> {
         let redirect_status = req
             .headers()
             .get("X-Redirect-Status")
@@ -338,24 +323,23 @@ mod tests {
     #[tokio::test]
     async fn test_fetch_client() {
         let client = FetchClient::new();
-        let request = FetchRequestBuilder::new()
+        let mut headers = hyper::header::HeaderMap::new();
+        headers.insert("Content-Type", HeaderValue::from_static("application/json"));
+        let request = HttpRequestBuilder::new()
             .method("GET")
             .uri(Uri::from_static("https://httpbin.org/get"))
-            .headers(HeadersMap::new(vec![(
-                "Content-Type".to_string(),
-                "application/json".to_string(),
-            )]))
+            .headers(headers)
             .body(RequestBody::None)
             .build()
             .unwrap();
 
-        let response = client.execute(request).unwrap().await.unwrap();
-        assert_eq!(response.status, 200);
-        assert_eq!(response.status_message, "OK");
-        assert_eq!(response.urls[0], "https://httpbin.org/get");
-        assert_eq!(response.aborted, false);
+        let mut response = client.execute(request).unwrap().await.unwrap();
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.status().canonical_reason().unwrap(), "OK");
+        assert_eq!(response.urls()[0], "https://httpbin.org/get");
+        assert_eq!(response.is_aborted(), false);
 
-        let body = match response.body {
+        let body = match response.take_body() {
             ResponseBody::DecodedStream(stream) => stream,
             _ => panic!("Expected body"),
         };
@@ -374,13 +358,12 @@ mod tests {
     #[tokio::test]
     async fn test_fetch_redirect() {
         let client = FetchClient::new();
-        let request = FetchRequestBuilder::new()
+        let mut headers = hyper::header::HeaderMap::new();
+        headers.insert("Content-Type", HeaderValue::from_static("application/json"));
+        let request = HttpRequestBuilder::new()
             .method("POST")
             .uri(Uri::from_static("http://localhost:3000"))
-            .headers(HeadersMap::new(vec![(
-                "Content-Type".to_string(),
-                "application/json".to_string(),
-            )]))
+            .headers(headers)
             .body(RequestBody::None)
             .redirect(RequestRedirect::Follow)
             .build()
@@ -390,7 +373,7 @@ mod tests {
         let server = start_test_server(handler_redirect, rx, 3000);
 
         let response = client.execute(request).unwrap();
-        let mut response_data: Option<FetchResponse> = None;
+        let mut response_data: Option<HttpResponse> = None;
         tokio::select! {
             _ = server => {}
             response = response => {
@@ -401,17 +384,17 @@ mod tests {
         };
 
         assert!(response_data.is_some());
-        let response = response_data.unwrap();
+        let mut response = response_data.unwrap();
 
-        assert_eq!(response.status, 200);
-        assert_eq!(response.status_message, "OK");
-        assert_eq!(response.urls.len(), 3);
-        assert_eq!(response.urls[0], "http://localhost:3000");
-        assert_eq!(response.urls[1], "http://localhost:3000/1");
-        assert_eq!(response.urls[2], "http://localhost:3000/2");
-        assert_eq!(response.aborted, false);
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.status().canonical_reason().unwrap(), "OK");
+        assert_eq!(response.urls().len(), 3);
+        assert_eq!(response.urls()[0], "http://localhost:3000");
+        assert_eq!(response.urls()[1], "http://localhost:3000/1");
+        assert_eq!(response.urls()[2], "http://localhost:3000/2");
+        assert_eq!(response.is_aborted(), false);
 
-        let body = match response.body {
+        let body = match response.take_body() {
             ResponseBody::DecodedStream(stream) => stream,
             _ => panic!("Expected body"),
         };
@@ -429,14 +412,12 @@ mod tests {
         let client = FetchClient::new();
         let mut internal_stream = BoundedBufferChannel::new(10);
         internal_stream.try_write(vec![1, 2, 3, 4]).unwrap();
-
-        let request = FetchRequestBuilder::new()
+        let mut headers = hyper::header::HeaderMap::new();
+        headers.insert("Content-Type", HeaderValue::from_static("application/json"));
+        let request = HttpRequestBuilder::new()
             .method("POST")
             .uri(Uri::from_static("http://localhost:3001"))
-            .headers(HeadersMap::new(vec![(
-                "Content-Type".to_string(),
-                "application/json".to_string(),
-            )]))
+            .headers(headers)
             .body(RequestBody::Stream(
                 internal_stream
                     .aquire_reader()
@@ -450,7 +431,7 @@ mod tests {
         let server = start_test_server(handler_redirect, rx, 3001);
 
         let response = client.execute(request).unwrap();
-        let mut response_data: Option<FetchResponse> = None;
+        let mut response_data: Option<HttpResponse> = None;
         tokio::select! {
             _ = server => {}
             response = response => {
@@ -461,21 +442,21 @@ mod tests {
         };
 
         assert!(response_data.is_some());
-        let response = response_data.unwrap();
+        let mut response = response_data.unwrap();
 
-        assert_eq!(response.status, 200);
-        assert_eq!(response.status_message, "OK");
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.status().canonical_reason().unwrap(), "OK");
         assert_eq!(
-            response.urls,
+            response.urls(),
             vec![
                 "http://localhost:3001",
                 "http://localhost:3001/1",
                 "http://localhost:3001/2"
             ]
         );
-        assert_eq!(response.aborted, false);
+        assert_eq!(response.is_aborted(), false);
 
-        let body = match response.body {
+        let body = match response.take_body() {
             ResponseBody::DecodedStream(stream) => stream,
             _ => panic!("Expected body"),
         };
@@ -493,14 +474,13 @@ mod tests {
         let client = FetchClient::new();
         let mut internal_stream = BoundedBufferChannel::new(10);
         internal_stream.try_write(vec![1, 2, 3, 4]).unwrap();
-
-        let request = FetchRequestBuilder::new()
+        let mut headers = hyper::header::HeaderMap::new();
+        headers.insert("Content-Type", HeaderValue::from_static("application/json"));
+        headers.insert("X-Redirect-Status", HeaderValue::from_static("302"));
+        let request = HttpRequestBuilder::new()
             .method("POST")
             .uri(Uri::from_static("http://localhost:3002"))
-            .headers(HeadersMap::new(vec![
-                ("Content-Type".to_string(), "application/json".to_string()),
-                ("X-Redirect-Status".to_string(), "302".to_string()),
-            ]))
+            .headers(headers)
             .body(RequestBody::Stream(
                 internal_stream
                     .aquire_reader()
@@ -539,13 +519,13 @@ mod tests {
     #[tokio::test]
     async fn test_fetch_too_many_redirects() {
         let client = FetchClient::new();
-        let request = FetchRequestBuilder::new()
+        let mut headers = hyper::header::HeaderMap::new();
+        headers.insert("Content-Type", HeaderValue::from_static("application/json"));
+        headers.insert("X-Redirect-Status", HeaderValue::from_static("301"));
+        let request = HttpRequestBuilder::new()
             .method("POST")
             .uri(Uri::from_static("http://localhost:3003/many"))
-            .headers(HeadersMap::new(vec![
-                ("Content-Type".to_string(), "application/json".to_string()),
-                ("X-Redirect-Status".to_string(), "301".to_string()),
-            ]))
+            .headers(headers)
             .body(RequestBody::None)
             .redirect(RequestRedirect::Follow)
             .build()
@@ -576,7 +556,7 @@ mod tests {
 
     async fn basic_auth_handler(
         req: Request<body::Incoming>,
-    ) -> Result<Response<Full<Bytes>>, Infallible> {
+    ) -> Result<Response<Full<Bytes>>, std::convert::Infallible> {
         println!("URL> {:?}", req.uri().host());
         let auth = req.headers().get(AUTHORIZATION).unwrap();
         let auth = auth.to_str().unwrap();
@@ -595,13 +575,12 @@ mod tests {
     #[tokio::test]
     async fn test_basic_auth() {
         let client = FetchClient::new();
-        let request = FetchRequestBuilder::new()
+        let mut headers = hyper::header::HeaderMap::new();
+        headers.insert("Content-Type", HeaderValue::from_static("application/json"));
+        let request = HttpRequestBuilder::new()
             .method("GET")
             .uri(Uri::from_static("http://username:password@localhost:3004"))
-            .headers(HeadersMap::new(vec![(
-                "Content-Type".to_string(),
-                "application/json".to_string(),
-            )]))
+            .headers(headers)
             .body(RequestBody::None)
             .build()
             .unwrap();
@@ -609,7 +588,7 @@ mod tests {
         let (tx, rx) = tokio::sync::broadcast::channel::<()>(1);
         let server = start_test_server(basic_auth_handler, rx, 3004);
         let response = client.execute(request).unwrap();
-        let mut response_data: Option<FetchResponse> = None;
+        let mut response_data: Option<HttpResponse> = None;
         tokio::select! {
             _ = server => {}
             response = response => {
@@ -621,19 +600,18 @@ mod tests {
 
         assert!(response_data.is_some());
         let response = response_data.unwrap();
-        assert_eq!(response.status, 200);
+        assert_eq!(response.status(), 200);
     }
 
     #[tokio::test]
     async fn test_basic_auth_fail() {
         let client = FetchClient::new();
-        let request = FetchRequestBuilder::new()
+        let mut headers = hyper::header::HeaderMap::new();
+        headers.insert("Content-Type", HeaderValue::from_static("application/json"));
+        let request = HttpRequestBuilder::new()
             .method("GET")
             .uri(Uri::from_static("http://wrong:pass@localhost:3005"))
-            .headers(HeadersMap::new(vec![(
-                "Content-Type".to_string(),
-                "application/json".to_string(),
-            )]))
+            .headers(headers)
             .body(RequestBody::None)
             .build()
             .unwrap();
@@ -641,7 +619,7 @@ mod tests {
         let (tx, rx) = tokio::sync::broadcast::channel::<()>(1);
         let server = start_test_server(basic_auth_handler, rx, 3005);
         let response = client.execute(request).unwrap();
-        let mut response_data: Option<FetchResponse> = None;
+        let mut response_data: Option<HttpResponse> = None;
         tokio::select! {
             _ = server => {}
             response = response => {
@@ -653,23 +631,27 @@ mod tests {
 
         assert!(response_data.is_some());
         let response = response_data.unwrap();
-        assert_eq!(response.status, 401);
-        assert!(response.status_message.contains("Unauthorized"));
+        assert_eq!(response.status(), 401);
+        assert!(response
+            .status()
+            .canonical_reason()
+            .unwrap()
+            .contains("Unauthorized"));
     }
 
     #[tokio::test]
     async fn test_fetch_remove_sensitive_headers() {
-        let headers = HeadersMap::new(vec![
-            ("Content-Type".to_string(), "application/json".to_string()),
-            ("Authorization".to_string(), "Bearer token".to_string()),
-            ("Cookie".to_string(), "cookie".to_string()),
-            (
-                "Proxy-Authorization".to_string(),
-                "Bearer token".to_string(),
-            ),
-        ]);
+        let mut headers = hyper::header::HeaderMap::new();
+        headers.insert("Content-Type", HeaderValue::from_static("application/json"));
+        headers.insert("Cookie", HeaderValue::from_static("cookie"));
+        headers.insert("Authorization", HeaderValue::from_static("Bearer token"));
+        headers.insert(
+            "Proxy-Authorization",
+            HeaderValue::from_static("Bearer token"),
+        );
+        headers.insert("WWW-Authenticate", HeaderValue::from_static("Bearer token"));
 
-        let mut request = FetchRequestBuilder::new()
+        let mut request = HttpRequestBuilder::new()
             .method("GET")
             .uri(Uri::from_static("http://localhost:3006"))
             .headers(headers.clone())
@@ -681,34 +663,33 @@ mod tests {
             &mut request,
             &Uri::from_static("http://localhost:3007"),
         );
-        assert_eq!(request.headers.inner.len(), 1);
+        assert_eq!(request.headers().len(), 1);
         assert_eq!(
-            request.headers.inner[0],
-            ("Content-Type".to_string(), "application/json".to_string())
+            request.headers().get("Content-Type").unwrap(),
+            &HeaderValue::from_static("application/json")
         );
     }
 
     #[tokio::test]
     async fn test_fetch_decompression() {
         let client = FetchClient::new();
-        let request = FetchRequestBuilder::new()
+        let mut headers = hyper::header::HeaderMap::new();
+        headers.insert("Content-Type", HeaderValue::from_static("application/json"));
+        let request = HttpRequestBuilder::new()
             .method("GET")
             .uri(Uri::from_static("https://httpbin.org/gzip"))
-            .headers(HeadersMap::new(vec![(
-                "Content-Type".to_string(),
-                "application/json".to_string(),
-            )]))
+            .headers(headers)
             .body(RequestBody::None)
             .build()
             .unwrap();
 
-        let response = client.execute(request).unwrap().await.unwrap();
-        assert_eq!(response.status, 200);
-        assert_eq!(response.status_message, "OK");
-        assert_eq!(response.urls[0], "https://httpbin.org/gzip");
-        assert_eq!(response.aborted, false);
+        let mut response = client.execute(request).unwrap().await.unwrap();
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.status().canonical_reason().unwrap(), "OK");
+        assert_eq!(response.urls()[0], "https://httpbin.org/gzip");
+        assert_eq!(response.is_aborted(), false);
 
-        let body = match response.body {
+        let body = match response.take_body() {
             ResponseBody::DecodedStream(stream) => stream,
             _ => panic!("Expected body"),
         };
@@ -719,18 +700,18 @@ mod tests {
         }
         let body = String::from_utf8(buffer).unwrap();
         assert!(body.contains("gzipped"));
+        assert!(body.len() > 0);
     }
 
     #[tokio::test]
     async fn test_fetch_network_error() {
         let client = FetchClient::new();
-        let request = FetchRequestBuilder::new()
+        let mut headers = hyper::header::HeaderMap::new();
+        headers.insert("Content-Type", HeaderValue::from_static("application/json"));
+        let request = HttpRequestBuilder::new()
             .method("GET")
             .uri(Uri::from_static("http://localhost:3008"))
-            .headers(HeadersMap::new(vec![(
-                "Content-Type".to_string(),
-                "application/json".to_string(),
-            )]))
+            .headers(headers)
             .body(RequestBody::None)
             .build()
             .unwrap();

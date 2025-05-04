@@ -2,6 +2,21 @@ import { ReadableStream } from "@kedo/stream";
 
 const encoder = new TextEncoder();
 
+// async function readFiles() {
+//   const random = `${Math.random()}-${Math.random()}-${new Date().getTime()}`;
+//   const content = await Kedo.readFile(
+//     "/Users/kcaicedo/Documents/Projects/kedojs/local/examples/fs/data.txt",
+//   );
+//   await Kedo.writeFile(
+//     `/Users/kcaicedo/Documents/Projects/kedojs/local/examples/mocks/data-kedo-${random}.txt`,
+//     content,
+//   );
+//   await Kedo.remove(
+//     `/Users/kcaicedo/Documents/Projects/kedojs/local/examples/mocks/data-kedo-${random}.txt`,
+//     false,
+//   );
+// }
+
 async function testServerListen() {
   // Test 1: Passing URLSearchParams as the body
   Kedo.serve(
@@ -28,7 +43,7 @@ async function testServerListen() {
           controller.close();
         },
       });
-
+      // await readFiles();
       return new Response(body, {
         headers: { "content-type": "application/octet-stream" },
       });

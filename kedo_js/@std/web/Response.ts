@@ -22,7 +22,7 @@ type InnerResponse = {
     statusMessage: string;
     headerList: [string, string][];
     body: Uint8Array | ExtractedBody | null;
-    cacheState: "" | "local" | "validated";
+    // cacheState: "" | "local" | "validated";
 };
 
 const defaultInnerResponse = (): InnerResponse => {
@@ -37,7 +37,7 @@ const defaultInnerResponse = (): InnerResponse => {
         statusMessage: "",
         headerList: [],
         body: null,
-        cacheState: "",
+        // cacheState: "",
         aborted: false,
     };
     return response;
@@ -248,7 +248,6 @@ function toHttpResponse(response: Response): HttpResponse {
     const httpResponse: HttpResponse = {
         url: response.url || "/",
         status: innerResponse.status,
-        status_message: innerResponse.statusMessage,
         headers: headersList,
     };
 

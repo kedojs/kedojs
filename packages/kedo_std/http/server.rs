@@ -1,10 +1,12 @@
 use crate::http::body::HttpBody;
-use futures::{channel::oneshot, FutureExt as _, Stream};
+use futures::{
+    channel::oneshot, stream::FuturesUnordered, FutureExt as _, Stream, StreamExt,
+};
 use hyper::{body::Incoming, service::Service, Request, Response};
 use std::{borrow::BorrowMut, future::Future, net::ToSocketAddrs, pin::Pin, sync::Arc};
 use thiserror::Error;
 use tokio::{
-    net::TcpListener,
+    // net::TcpListener,
     sync::{
         mpsc::{self},
         watch,
@@ -209,7 +211,7 @@ pub struct HttpServer {
     pub(crate) enable_http1: bool,
     pub(crate) tls_config: Option<Arc<ServerConfig>>,
     pub(crate) ttl: Option<u32>,
-    tcp_listener: Option<TcpListener>,
+    tcp_listener: Option<crate::TcpListener>,
     acceptor: Option<tokio_rustls::TlsAcceptor>,
 }
 
@@ -288,7 +290,7 @@ impl HttpServer {
         let stream = hyper_util::rt::TokioIo::new(Box::pin(stream));
         let rt = hyper_util::rt::TokioExecutor::new();
         let builder = hyper_util::server::conn::auto::Builder::new(rt);
-        let conn = builder.serve_connection_with_upgrades(
+        let conn = builder.serve_connection(
             stream,
             serv_clone.clone(),
             // service_fn(move |req| {
@@ -326,6 +328,8 @@ impl HttpServer {
         let (shutdown_signal, mut shutdown_receiver) = watch::channel(());
         let (service, req_receiver) = HttpService::new();
 
+        let mut tasks = FuturesUnordered::new();
+
         let server = async move {
             loop {
                 let serv_clone = service.clone();
@@ -340,7 +344,11 @@ impl HttpServer {
                         };
 
                         // stream.set_nodelay(true).unwrap();
-                        self.accept_connection(stream, serv_clone);
+                        tasks.push(HttpServer::accept_http_connection(stream, serv_clone));
+                        // self.accept_connection(stream, serv_clone);
+                        continue;
+                    }
+                    Some(_) = tasks.next() => {
                         continue;
                     }
                     _ = tokio::signal::ctrl_c() => {
@@ -417,7 +425,7 @@ impl HttpServerBuilder {
                 "Address is required",
             )))?;
 
-        let tpc_listener = TcpListener::bind(match addr {
+        let addr = match addr {
             HttpSocketAddr::IpSocket(addr) => addr,
             #[cfg(unix)]
             HttpSocketAddr::UnixSocket(_) => {
@@ -426,12 +434,28 @@ impl HttpServerBuilder {
                     "Unix sockets are not supported",
                 )));
             }
-        })
-        .await?;
+        };
 
-        if let Some(ttl) = self.ttl {
-            tpc_listener.set_ttl(ttl)?;
-        }
+        let tcp_listener =
+            crate::TcpListener::bind(addr, crate::TcpOptions::default()).await?;
+
+        // let socket = socket2::Socket::new(
+        //     socket2::Domain::IPV4,
+        //     socket2::Type::STREAM,
+        //     Some(socket2::Protocol::TCP),
+        // )?;
+        // socket.set_reuse_address(true)?;
+        // #[cfg(target_os = "linux")]
+        // socket.set_reuse_port(true)?; // Linux only
+        // socket.bind(&addr.into())?;
+        // socket.listen(1024)?;
+        // socket.set_nonblocking(true)?;
+        // socket.set_keepalive(true)?;
+        // let tcp_listener = TcpListener::from_std(socket.into())?;
+
+        // if let Some(ttl) = self.ttl {
+        //     tcp_listener.set_ttl(ttl)?;
+        // }
 
         let acceptor = match self.tls_config {
             Some((certs, key)) => {
@@ -449,12 +473,12 @@ impl HttpServerBuilder {
         };
 
         Ok(HttpServer {
-            addr,
+            addr: HttpSocketAddr::IpSocket(addr),
             enable_http2: true,
             enable_http1: true,
             tls_config: None,
             ttl: None,
-            tcp_listener: Some(tpc_listener),
+            tcp_listener: Some(tcp_listener),
             acceptor,
         })
     }
@@ -467,13 +491,15 @@ mod tests {
     use futures::stream::TryStreamExt;
     use futures::StreamExt;
     use http_body_util::{BodyExt, Full};
-    use hyper::Uri;
+    use hyper::{
+        header::{self, HeaderValue},
+        Uri,
+    };
     use tokio_rustls::rustls::pki_types::pem::PemObject;
 
     use crate::http::{
         fetch::FetchClient,
-        headers::HeadersMap,
-        request::{FetchRequest, FetchRequestBuilder, RequestBody},
+        request::{HttpRequest, HttpRequestBuilder, RequestBody},
         response::ResponseBody,
     };
 
@@ -504,13 +530,12 @@ mod tests {
     #[tokio::test]
     async fn test_http_server() {
         let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
-        let request = FetchRequestBuilder::new()
+        let mut headers = hyper::header::HeaderMap::new();
+        headers.insert("Content-Type", HeaderValue::from_static("application/json"));
+        let request = HttpRequestBuilder::new()
             .method("GET")
             .uri(Uri::from_static("http://127.0.0.1:8080"))
-            .headers(HeadersMap::new(vec![(
-                "Content-Type".to_string(),
-                "application/json".to_string(),
-            )]))
+            .headers(headers)
             .body(RequestBody::None)
             .build()
             .unwrap();
@@ -569,16 +594,16 @@ mod tests {
         key
     }
 
-    async fn send_client_request(request: FetchRequest) -> (String, u16) {
+    async fn send_client_request(request: HttpRequest) -> (String, u16) {
         let client = FetchClient::new();
-        let response = match client.execute(request).unwrap().await {
+        let mut response = match client.execute(request).unwrap().await {
             Ok(res) => res,
             Err(err) => {
                 panic!("Failed to fetch: {}", err.describe());
             }
         };
 
-        let body = match response.body {
+        let body = match response.take_body() {
             ResponseBody::DecodedStream(stream) => stream,
             _ => panic!("Expected body"),
         };
@@ -587,7 +612,10 @@ mod tests {
         while let Some(chunk) = body.next().await {
             buffer.extend_from_slice(&chunk.unwrap());
         }
-        return (String::from_utf8(buffer).unwrap(), response.status);
+        return (
+            String::from_utf8(buffer).unwrap(),
+            response.status().as_u16(),
+        );
     }
 
     async fn create_https_server(addr: SocketAddr) -> HttpServer {
@@ -611,13 +639,15 @@ mod tests {
     #[tokio::test]
     async fn test_https_server() {
         let addr = SocketAddr::from(([127, 0, 0, 1], 8082));
-        let request = FetchRequestBuilder::new()
+        let mut headers = hyper::header::HeaderMap::new();
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+        let request = HttpRequestBuilder::new()
             .method("GET")
             .uri(Uri::from_static("https://localhost:8082"))
-            .headers(HeadersMap::new(vec![(
-                "Content-Type".to_string(),
-                "application/json".to_string(),
-            )]))
+            .headers(headers)
             .body(RequestBody::None)
             .build()
             .unwrap();
@@ -655,11 +685,17 @@ mod tests {
         let server = create_https_server(addr).await;
         let (mut handler, mut receiver) = server.accept().unwrap();
         let completion = handler.completion().unwrap();
+        let mut headers = hyper::header::HeaderMap::new();
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+        headers.insert(header::USER_AGENT, HeaderValue::from_static("kedo"));
 
         tokio::join!(
             completion,
             async move {
-                let counter = 0;
+                let mut counter = 0;
                 while let Some(event) = receiver.next().await {
                     let mut req_event = event;
                     let req = req_event.req;
@@ -668,17 +704,15 @@ mod tests {
                     if counter == 3 {
                         break;
                     }
+                    // counter += 1;
                 }
             },
             async move {
                 for _ in 0..3 {
-                    let request = FetchRequestBuilder::new()
+                    let request = HttpRequestBuilder::new()
                         .method("GET")
                         .uri(Uri::from_static("https://localhost:8083"))
-                        .headers(HeadersMap::new(vec![(
-                            "Content-Type".to_string(),
-                            "application/json".to_string(),
-                        )]))
+                        .headers(headers.clone())
                         .body(RequestBody::None)
                         .build()
                         .unwrap();

@@ -3,9 +3,8 @@ import {
   encoding_decode,
   encoding_decode_once,
   encoding_decode_utf8_once,
-  encoding_encode,
   encoding_for_label_no_replacement,
-  EncodingTextDecoder,
+  EncodingTextDecoder
 } from "@kedo:op/web";
 
 interface TextDecoderOptions {
@@ -109,7 +108,7 @@ class TextEncoder {
   }
 
   encode(input = ""): Uint8Array {
-    return new Uint8Array(encoding_encode(input));
+    return UFT8Encoding(input);
   }
 }
 
