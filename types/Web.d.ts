@@ -70,7 +70,9 @@ interface TextDecoderOptions {
     ignoreBOM?: boolean;
 }
 
-type MixingBodyInput = import("@kedo:int/std/web").Request | import("@kedo:int/std/web").Response;
+type MixingBodyInput =
+    | import("@kedo:int/std/web").Request
+    | import("@kedo:int/std/web").Response;
 
 interface TextDecodeOptions {
     stream?: boolean;
@@ -80,8 +82,19 @@ declare type TextDecodeInput = ArrayBufferView | ArrayBuffer | DataView;
 
 declare type RequestInfo = import("@kedo:int/std/web").Request | string;
 declare type ResponseTainting = "basic" | "cors" | "opaque";
-declare type ResponseType = "basic" | "cors" | "default" | "error" | "opaque" | "opaqueredirect";
-declare type BodyInit = import("@kedo:int/std/web").URLSearchParams | ArrayBuffer | ArrayBufferView | import("@kedo/stream").ReadableStream | string;
+declare type ResponseType =
+    | "basic"
+    | "cors"
+    | "default"
+    | "error"
+    | "opaque"
+    | "opaqueredirect";
+declare type BodyInit =
+    | import("@kedo:int/std/web").URLSearchParams
+    | ArrayBuffer
+    | ArrayBufferView
+    | import("@kedo/stream").ReadableStream
+    | string;
 
 declare type ServeOptions = {
     hostname?: string;
@@ -97,9 +110,14 @@ declare type TlsCertificate = {
     cert: string;
 };
 
-declare type ServerHandler = (request: import("@kedo:int/std/web").Request) => Promise<import("@kedo:int/std/web").Response>;
+declare type ServerHandler = (
+    request: import("@kedo:int/std/web").Request,
+) => Promise<import("@kedo:int/std/web").Response>;
 
-type HeadersInit = import("@kedo:int/std/web").Headers | Record<string, string> | [string, string][];
+type HeadersInit =
+    | import("@kedo:int/std/web").Headers
+    | Record<string, string>
+    | [string, string][];
 
 interface ResponseInit {
     status?: number;
@@ -165,16 +183,21 @@ interface IResponse {
 declare module "@kedo/web" {
     export {
         AbortController,
-        AbortSignal, DOMException, fetch, Headers, Request,
+        AbortSignal,
+        DOMException,
+        fetch,
+        Headers,
+        Request,
         Response,
-        serve, TextDecoder,
-        TextEncoder, URL,
-        URLSearchParams
+        serve,
+        TextDecoder,
+        TextEncoder,
+        URL,
+        URLSearchParams,
     } from "@kedo:int/std/web";
 }
 
 declare module "@kedo:int/std/web" {
-
     import { EventTarget } from "@kedo/events";
     type ForEachCallback = (
         value: string,
@@ -231,7 +254,7 @@ declare module "@kedo:int/std/web" {
     /**
      * Represents an exception that is thrown when a DOM-related error occurs.
      * Extends the built-in Error object with a numeric code and other DOM-specific properties.
-     * 
+     *
      * @public
      * @remarks
      * Inspired by the browser DOMException interface, it contains legacy codes and names
@@ -240,20 +263,20 @@ declare module "@kedo:int/std/web" {
     class DOMException extends Error {
         /**
          * A string identifying the type of error.
-         * 
+         *
          * @public
          */
         readonly name: string;
 
         /**
          * Provides details about the exception that was raised.
-         * 
+         *
          * @public
          */
         readonly message: string;
         /**
          * A legacy numeric code corresponding to the type of error, retained for compatibility.
-         * 
+         *
          * @public
          */
         readonly code: number;
@@ -285,24 +308,24 @@ declare module "@kedo:int/std/web" {
 
         /**
          * Several static properties representing standard error codes used by DOM specifications.
-         * 
+         *
          * @public
          */
         private static readonly errorCodes;
 
         /**
          * Constructs a new DOMException.
-         * 
+         *
          * @param message - Optional error message summarizing the exception.
          * @param name - Optional error name. Defaults to 'Error' if not specified.
-         * 
+         *
          * @public
          */
         constructor(message?: string, name?: string);
 
         /**
          * Serializes the DOMException into a plain object.
-         * 
+         *
          * @returns An object with the exception's name, message, and code.
          * @public
          */
@@ -314,7 +337,7 @@ declare module "@kedo:int/std/web" {
 
         /**
          * Recreates a DOMException from a serialized object.
-         * 
+         *
          * @param serialized - Object containing at least a name and message property.
          * @returns A new DOMException populated with the serialized data.
          * @public
@@ -505,7 +528,9 @@ declare module "@kedo:int/std/web" {
     class URLSearchParams {
         [_list]: [string, string][];
         [_urlObject]: URL | null;
-        constructor(init?: [string, string][] | Record<string, string> | string);
+        constructor(
+            init?: [string, string][] | Record<string, string> | string,
+        );
         private update;
         get size(): number;
         append(name: string, value: string): void;
@@ -527,7 +552,7 @@ declare module "@kedo:int/std/web" {
     /**
      * Represents a URL object that provides methods and properties for working with URLs.
      * This class follows the WHATWG URL Standard.
-     * 
+     *
      * @class
      * @example
      * ```typescript
@@ -535,7 +560,7 @@ declare module "@kedo:int/std/web" {
      * console.log(url.hostname); // "example.com"
      * console.log(url.searchParams.get('query')); // "value"
      * ```
-     * 
+     *
      * @property {URLSearchParams} searchParams - Contains the query string parameters
      * @property {string} origin - Returns the origin of the URL (protocol + hostname + port)
      * @property {string} protocol - Gets or sets the protocol scheme of the URL
@@ -548,11 +573,11 @@ declare module "@kedo:int/std/web" {
      * @property {string} search - Gets or sets the query string portion of the URL
      * @property {string} hash - Gets or sets the fragment identifier of the URL
      * @property {string} href - Gets or sets the entire URL as a string
-     * 
+     *
      * @constructor
      * @param {string} url - The URL string to parse
      * @param {string} [base] - An optional base URL to resolve against
-     * 
+     *
      * @throws {TypeError} When the URL is invalid or cannot be parsed
      */
     class URL {
@@ -590,9 +615,9 @@ declare module "@kedo:int/std/web" {
     /**
      * The TextDecoder interface represents a decoder for a specific text encoding.
      * It provides functionality to decode buffer data into strings using specified character encodings.
-     * 
+     *
      * @see https://developer.mozilla.org/en-US/docs/Web/API/TextDecoder
-     * 
+     *
      * @example
      * const decoder = new TextDecoder(); // defaults to 'utf-8'
      * const text = decoder.decode(uint8Array);
@@ -608,13 +633,13 @@ declare module "@kedo:int/std/web" {
     /**
      * The TextEncoder class represents an encoder that takes a stream of code points as input
      * and emits a stream of bytes. It converts JavaScript strings into bytes using UTF-8 encoding.
-     * 
+     *
      * @example
      * ```typescript
      * const encoder = new TextEncoder();
      * const bytes = encoder.encode('Hello'); // Returns Uint8Array
      * ```
-     * 
+     *
      * @remarks
      * TextEncoder only supports UTF-8 encoding.
      */
@@ -705,7 +730,10 @@ declare module "@kedo:int/std/web" {
 
     function fetch(input: RequestInfo, init?: RequestInit): Promise<Response>;
 
-    function serve(options: ServeOptions | ServerHandler | (ServeOptions & TlsCertificate), _serverOptions?: ServeOptions | (ServeOptions & TlsCertificate)): void;
+    function serve(
+        options: ServeOptions | ServerHandler | (ServeOptions & TlsCertificate),
+        _serverOptions?: ServeOptions | (ServeOptions & TlsCertificate),
+    ): void;
 
     export {
         AbortController,
@@ -723,6 +751,6 @@ declare module "@kedo:int/std/web" {
         TextDecoder,
         TextEncoder,
         URL,
-        URLSearchParams
+        URLSearchParams,
     };
 }

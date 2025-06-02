@@ -1,14 +1,17 @@
-import { DirEntry } from '@kedo/fs';
+import { DirEntry } from "@kedo/fs";
 import {
-  AbortController,
-  AbortSignal,
-  DOMException,
-  Headers,
-  Request, Response,
-  TextDecoder, TextEncoder,
-  URL,
-  URLSearchParams,
-  fetch, serve
+    AbortController,
+    AbortSignal,
+    DOMException,
+    Headers,
+    Request,
+    Response,
+    TextDecoder,
+    TextEncoder,
+    URL,
+    URLSearchParams,
+    fetch,
+    serve,
 } from "@kedo/web";
 
 globalThis.DOMException = DOMException;

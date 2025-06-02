@@ -35,7 +35,9 @@ impl EncodingTextDecoder {
         manager: &mut ClassTable,
         ctx: &JSContext,
     ) -> Result<(), ClassError> {
-        let class = manager.get(EncodingTextDecoder::CLASS_NAME).unwrap();
+        let class = manager
+            .get(EncodingTextDecoder::CLASS_NAME)
+            .expect("EncodingTextDecoder Class not found");
         let template_object = class.object::<InnerTextDecoder>(ctx, None);
         proto_manager
             .insert(EncodingTextDecoder::PROTO_NAME.to_string(), template_object);
@@ -44,8 +46,10 @@ impl EncodingTextDecoder {
 
     pub fn template_object(ctx: &JSContext, scope: &JSObject) -> JSResult<()> {
         let state = downcast_state(ctx);
-        let template_object =
-            state.protos().get(EncodingTextDecoder::PROTO_NAME).unwrap();
+        let template_object = state
+            .protos()
+            .get(EncodingTextDecoder::PROTO_NAME)
+            .expect("EncodingTextDecoder Proto not found");
         scope.set_property(
             EncodingTextDecoder::CLASS_NAME,
             &template_object,
@@ -115,25 +119,3 @@ impl EncodingTextDecoder {
         Ok(object.into())
     }
 }
-
-// #[cfg(test)]
-// mod tests {
-//     use crate::tests::test_utils::new_runtime;
-
-//     #[test]
-//     fn test_text_decoder() {
-//         let rt = new_runtime();
-//         let result = rt.evaluate_module_from_source(
-//             r#"
-//             import { EncodingTextDecoder } from '@kedo:op/web';
-//             globalThis.encoder = new EncodingTextDecoder('utf-8', true, false);
-//         "#,
-//             "index.js",
-//             None,
-//         );
-//         assert!(result.is_ok());
-//         let result = rt.evaluate_script("globalThis.encoder", None);
-//         assert!(result.is_ok());
-//         assert!(result.unwrap().is_object());
-//     }
-// }

@@ -1,4 +1,3 @@
-
 class Node<V> {
     value: V;
     next: Node<V> | null;
@@ -33,26 +32,26 @@ class Node<V> {
  * @public
  * @constructor
  * Creates a new empty Queue.
- * 
+ *
  * @method enqueue
  * Adds a new element to the end of the queue.
  * @param value - The element to be added.
- * 
+ *
  * @method dequeue
  * Removes and returns the first element in the queue.
  * @returns The first element in the queue.
- * 
+ *
  * @method peek
  * Returns the first element in the queue without removing it.
  * @returns The first element in the queue.
- * 
+ *
  * @method isEmpty
  * Checks if the queue is empty.
  * @returns A boolean indicating whether the queue is empty.
- * 
+ *
  * @method clear
  * Removes all elements from the queue.
- * 
+ *
  * @property size
  * Returns the current number of elements in the queue.
  */
@@ -64,7 +63,7 @@ class Queue<V> {
     constructor() {
         this.#head = null; // The front of the queue
         this.#tail = null; // The end of the queue
-        this.#length = 0;  // The number of elements in the queue
+        this.#length = 0; // The number of elements in the queue
     }
 
     // Adds an element to the back of the queue
@@ -85,7 +84,7 @@ class Queue<V> {
     // Removes an element from the front of the queue
     dequeue() {
         if (this.isEmpty()) {
-            throw new Error('Queue is empty');
+            throw new Error("Queue is empty");
         }
 
         const value = this.#head!.value;
@@ -101,7 +100,7 @@ class Queue<V> {
     // Returns the element at the front of the queue without removing it
     peek(): V {
         if (this.isEmpty()) {
-            throw new Error('Queue is empty');
+            throw new Error("Queue is empty");
         }
 
         return this.#head!.value;

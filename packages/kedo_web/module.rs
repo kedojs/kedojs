@@ -64,14 +64,14 @@ fn exports(ctx: &JSContext) -> JSObject {
             &queue_internal_timeout_fn,
             Default::default(),
         )
-        .unwrap();
+        .expect("Failed to set queue_internal_timeout");
     exports
         .set_property(
             "is_array_buffer_detached",
             &is_array_buffer_detached_fn,
             Default::default(),
         )
-        .unwrap();
+        .expect("Failed to set is_array_buffer_detached");
 
     UrlModule::export(ctx, &exports).expect("Failed to export UrlUtilModule");
     TextEncodingModule::export(ctx, &exports)
@@ -112,95 +112,4 @@ mod tests {
         let exports = module.evaluate(&ctx, "@kedo:op/web");
         assert!(exports.has_property("is_array_buffer_detached"));
     }
-
-    // #[test]
-    // fn test_utils_module_loader() {
-    //     let ctx = setup_module_loader();
-    //     let result = ctx.evaluate_module_from_source(
-    //         r#"
-    //         import { is_array_buffer_detached } from '@kedo:op/web';
-    //         globalThis.is_detached = is_array_buffer_detached(new ArrayBuffer(10));
-    //     "#,
-    //         "index.js",
-    //         None,
-    //     );
-
-    //     assert!(result.is_ok());
-    //     let result = ctx.evaluate_script("globalThis.is_detached", None);
-    //     assert!(result.is_ok());
-    //     let result = result.unwrap();
-    //     assert!(result.is_boolean());
-    //     assert_eq!(result.as_boolean(), false);
-
-    //     let result = ctx.evaluate_module_from_source(
-    //         r#"
-    //         import { is_array_buffer_detached } from '@kedo:op/web';
-    //         const buffer = new ArrayBuffer(10);
-    //         const b = buffer.transfer(20);
-    //         globalThis.is_detached = is_array_buffer_detached(buffer);
-    //     "#,
-    //         "index.js",
-    //         None,
-    //     );
-    //     assert!(result.is_ok());
-    //     let result = ctx.evaluate_script("globalThis.is_detached", None);
-    //     assert!(result.is_ok());
-    //     assert_eq!(result.unwrap().as_boolean(), true);
-    // }
-
-    // #[tokio::test]
-    // async fn test_queue_internal_timeout() {
-    //     let mut rt = new_runtime();
-    //     let result = rt.evaluate_module_from_source(
-    //         r#"
-    //         import { queue_internal_timeout } from '@kedo:op/web';
-    //         globalThis.id = queue_internal_timeout(() => {
-    //             globalThis.done = true;
-    //         }, 100);
-    //     "#,
-    //         "index.js",
-    //         None,
-    //     );
-    //     assert!(result.is_ok());
-
-    //     let result = rt.evaluate_script("globalThis.id", None);
-    //     assert!(result.is_ok());
-    //     let result = result.unwrap();
-    //     assert!(result.is_number());
-    //     let id = result.as_number().unwrap() as u64;
-    //     assert_eq!(id, 1);
-
-    //     rt.idle().await;
-
-    //     let result = rt.evaluate_script("globalThis.done", None);
-    //     assert!(result.is_ok());
-    //     let result = result.unwrap();
-    //     assert!(result.is_undefined());
-    // }
-
-    // #[tokio::test]
-    // async fn test_queue_internal_timeout_with_blocking() {
-    //     let mut rt = new_runtime();
-    //     let result = rt.evaluate_module_from_source(
-    //         r#"
-    //         import { queue_internal_timeout } from '@kedo:op/web';
-    //         queue_internal_timeout(() => {
-    //             globalThis.done = true;
-    //         }, 100);
-
-    //         setTimeout(() => {}, 100);
-    //     "#,
-    //         "index.js",
-    //         None,
-    //     );
-    //     assert!(result.is_ok());
-
-    //     rt.idle().await;
-
-    //     let result = rt.evaluate_script("globalThis.done", None);
-    //     assert!(result.is_ok());
-    //     let result = result.unwrap();
-    //     assert!(result.is_boolean());
-    //     assert_eq!(result.as_boolean(), true);
-    // }
 }

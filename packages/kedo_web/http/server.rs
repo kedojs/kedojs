@@ -3,13 +3,13 @@ use crate::{
     signals::{InternalSignal, OneshotSignal},
     HttpRequestResource,
 };
-use futures::Stream;
+use futures::future::poll_fn;
 use kedo_core::{downcast_state, enqueue_job, native_job, ClassTable, NativeJob};
 use kedo_macros::js_class;
 use kedo_std::{
-    HttpRequest, HttpResponse, HttpServerBuilder, HttpSocketAddr, RequestEvent,
-    RequestEventSender, RequestReceiver, ServerHandle, StreamError,
-    UnboundedBufferChannel, UnboundedBufferChannelReader, UnboundedBufferChannelWriter,
+    BufferChannelReader, HttpConfig, HttpRequest, HttpRequestEvent, HttpResponse,
+    HttpResponseChannel, HttpServer, HttpServerBuilder, HttpSocketAddr, StreamError,
+    UnboundedBufferChannelReader,
 };
 use kedo_utils::{downcast_ref, js_error, js_error_typ, js_undefined};
 use rust_jsc::{
@@ -17,9 +17,7 @@ use rust_jsc::{
     JSContext, JSError, JSFunction, JSObject, JSResult, JSValue, PrivateData,
 };
 use std::{
-    future::Future,
     net::{SocketAddr, ToSocketAddrs},
-    pin::Pin,
     vec,
 };
 
@@ -29,7 +27,6 @@ struct ServerOptions {
     address: SocketAddr,
     key: Option<String>,
     cert: Option<String>,
-    // handler: JSObject,
 }
 
 impl ServerOptions {
@@ -47,8 +44,6 @@ impl ServerOptions {
             .and_then(|v| v.as_string())
             .ok()
             .map(|s| s.to_string());
-        // let handler = value.get_property("handler")?.as_object()?;
-        // handler.protect();
 
         let mut parsed_hostname = match (hostname.clone(), port).to_socket_addrs() {
             Ok(parsed) => parsed,
@@ -79,221 +74,15 @@ impl ServerOptions {
     }
 }
 
-struct HttpAccepterBuilder {
-    handler: Option<ServerHandle>,
-    receiver: Option<RequestReceiver>,
-    signal: Option<OneshotSignal>,
-    // queue: Option<Weak<RefCell<AsyncJobQueueInner>>>,
-    stream: Option<UnboundedBufferChannelWriter<RequestEvent>>,
-    // function: Option<JSObject>,
-}
-
-impl HttpAccepterBuilder {
-    pub fn new() -> Self {
-        Self {
-            handler: None,
-            receiver: None,
-            signal: None,
-            // queue: None,
-            stream: None,
-            // function: None,
-        }
-    }
-
-    pub fn handler(mut self, handler: ServerHandle) -> Self {
-        self.handler = Some(handler);
-        self
-    }
-
-    pub fn receiver(mut self, receiver: RequestReceiver) -> Self {
-        self.receiver = Some(receiver);
-        self
-    }
-
-    pub fn signal(mut self, signal: OneshotSignal) -> Self {
-        self.signal = Some(signal);
-        self
-    }
-
-    // pub fn queue(mut self, queue: Weak<RefCell<AsyncJobQueueInner>>) -> Self {
-    //     self.queue = Some(queue);
-    //     self
-    // }
-
-    // pub fn function(mut self, function: JSObject) -> Self {
-    //     self.function = Some(function);
-    //     self
-    // }
-
-    pub fn stream(mut self, stream: UnboundedBufferChannelWriter<RequestEvent>) -> Self {
-        self.stream = Some(stream);
-        self
-    }
-
-    pub fn build(self) -> HttpAccepter {
-        // let stream: UnboundedBufferChannel<RequestEvent> = UnboundedBufferChannel::new();
-        // let writer = stream.writer().unwrap();
-
-        HttpAccepter {
-            handler: self.handler,
-            receiver: Box::pin(self.receiver.expect("receiver is required")),
-            signal: self.signal.expect("signal is required"),
-            // queue: self.queue.expect("queue is required"),
-            stream: self.stream.expect("stream is required"),
-            // function: self.function.expect("function is required"),
-        }
-    }
-}
-
-struct HttpAccepter {
-    handler: Option<ServerHandle>,
-    receiver: Pin<Box<RequestReceiver>>,
-    signal: OneshotSignal,
-    // queue: Weak<RefCell<AsyncJobQueueInner>>,
-    stream: UnboundedBufferChannelWriter<RequestEvent>,
-    // function: JSObject,
-}
-
-// impl Drop for HttpAccepter {
-//     fn drop(&mut self) {
-//         self.function.unprotect();
-//     }
-// }
-
+/// | ---------------------- UnboundedBufferChannelReader ---------------------- |
+///
+/// This class is used to create a JS object that wraps a channel with the upcoming
+/// request events.
 #[js_class(
-    resource = UnboundedBufferChannelReader<RequestEvent>,
-    proto = "UnboundedBufferChannelReaderPrototype",
+    resource = UnboundedBufferChannelReader<HttpRequestEvent>,
+    proto = "NetworkBufferChannelReaderPrototype",
 )]
-pub struct UnboundedBufferChannelReaderResource {}
-
-impl HttpAccepter {
-    fn shutdown(&mut self) {
-        match self.handler.take() {
-            Some(handler) => {
-                handler.shutdown();
-            }
-            None => {}
-        };
-    }
-
-    fn is_shutdown(&self) -> bool {
-        self.handler.is_none()
-    }
-
-    // fn process_request(mut event: RequestEvent, function: JSObject) -> NativeJob {
-    //     // TODO: close the connection on error
-    //     let sender = event.sender.take().expect("Failed to take sender");
-    //     let request = FetchRequest::from_event(event).expect("Failed to convert request");
-
-    //     NativeJob::new(move |ctx| {
-    //         let state = downcast_state(&ctx);
-    //         let classes = state.classes();
-    //         let request_object = classes
-    //             .get(FetchRequestResource::CLASS_NAME)
-    //             .expect("FetchRequestResource class not found")
-    //             .object::<FetchRequest>(&ctx, Some(Box::new(request)));
-    //         let sender = classes
-    //             .get(RequestEventResource::CLASS_NAME)
-    //             .expect("RequestEventResource class not found")
-    //             .object::<RequestEventSender>(&ctx, Some(Box::new(sender)));
-
-    //         let _ = function.call(None, &[request_object.into(), sender.into()])?;
-    //         Ok(())
-    //     })
-    // }
-}
-
-impl Future for HttpAccepter {
-    type Output = NativeJob;
-
-    fn poll(
-        mut self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        let shutdown_signal = self.signal.poll_signal(cx);
-        if let std::task::Poll::Ready(Ok(())) = shutdown_signal {
-            match self.handler.take() {
-                Some(handler) => {
-                    println!("Shutting down the server");
-                    handler.shutdown();
-                }
-                None => {}
-            };
-
-            return std::task::Poll::Ready(NativeJob::new(|_| Ok(())));
-        };
-
-        // let mut http_events = vec![];
-        let mut is_channel_closed = false;
-        loop {
-            match self.receiver.as_mut().poll_next(cx) {
-                std::task::Poll::Ready(Some(event)) => {
-                    self.stream.try_write(event).expect("Failed to send event");
-                    // http_events.push(event)
-                }
-                std::task::Poll::Pending => break,
-                std::task::Poll::Ready(None) => {
-                    is_channel_closed = true;
-                    // The channel has been closed
-                    break;
-                }
-            };
-        }
-
-        if is_channel_closed {
-            return std::task::Poll::Ready(NativeJob::new(|_| Ok(())));
-        }
-
-        // if http_events.is_empty() {
-        //     if is_channel_closed {
-        //         return std::task::Poll::Ready(NativeJob::new(|_| Ok(())));
-        //     }
-
-        //     return std::task::Poll::Pending;
-        // }
-
-        // if let Some(queue_rc) = self.queue.upgrade() {
-        //     let queue_refcell: &RefCell<AsyncJobQueueInner> =
-        //         std::rc::Rc::as_ref(&queue_rc);
-
-        //     let function = self.function.clone();
-        //     queue_refcell
-        //         .borrow_mut()
-        //         .push_job(NativeJob::new(move |ctx| {
-        //             while let Some(mut event) = http_events.pop() {
-        //                 let sender = event.sender.take().expect("Failed to take sender");
-        //                 let request = HttpRequest::new(event.req);
-        //                 // FetchRequest::from_event(event)
-        //                 //     .expect("Failed to convert request");
-
-        //                 let state = downcast_state(&ctx);
-        //                 let classes = state.classes();
-        //                 let request_object = classes
-        //                     .get(HttpRequestResource::CLASS_NAME)
-        //                     .expect("HttpRequestResource class not found")
-        //                     .object::<HttpRequest>(&ctx, Some(Box::new(request)));
-        //                 let sender = classes
-        //                     .get(RequestEventResource::CLASS_NAME)
-        //                     .expect("RequestEventResource class not found")
-        //                     .object::<RequestEventSender>(&ctx, Some(Box::new(sender)));
-
-        //                 let _ = function
-        //                     .call(None, &[request_object.into(), sender.into()])?;
-        //             }
-
-        //             Ok(())
-        //         }));
-
-        //     if is_channel_closed {
-        //         return std::task::Poll::Ready(NativeJob::new(|_| Ok(())));
-        //     }
-
-        return std::task::Poll::Pending;
-        // };
-
-        // std::task::Poll::Ready(NativeJob::new(|_| Ok(())))
-    }
-}
+pub struct NetworkBufferChannelReaderResource {}
 
 #[callback]
 fn op_read_request_event(
@@ -303,7 +92,7 @@ fn op_read_request_event(
     reader: JSObject,
 ) -> JSResult<JSValue> {
     let state = downcast_state(&ctx);
-    let reader = downcast_ref::<UnboundedBufferChannelReader<RequestEvent>>(&reader);
+    let reader = downcast_ref::<UnboundedBufferChannelReader<HttpRequestEvent>>(&reader);
     let event = match reader {
         Some(mut reader) => reader.try_read(),
         None => {
@@ -317,8 +106,8 @@ fn op_read_request_event(
     let mut event = match event {
         Ok(event) => event,
         Err(err) => match err {
-            StreamError::Empty => {
-                return Ok(js_undefined!(&ctx));
+            StreamError::Closed | StreamError::Empty => {
+                return Ok(JSValue::number(&ctx, err.into()));
             }
             _ => {
                 return Err(js_error_typ!(
@@ -330,17 +119,16 @@ fn op_read_request_event(
     };
 
     let classes = state.classes();
-    let sender = event.sender.take().expect("Failed to take sender");
-    // let request = FetchRequest::from_event(event).expect("Failed to convert request");
+    let sender = event.channel.take().expect("Failed to take sender");
 
     let request_object = classes
         .get(HttpRequestResource::CLASS_NAME)
-        .expect("FetchResponse class not found")
+        .expect("HttpRequestResource class not found")
         .object::<HttpRequest>(&ctx, Some(Box::new(HttpRequest::new(event.req))));
     let sender_object = classes
         .get(RequestEventResource::CLASS_NAME)
         .expect("RequestEventResource class not found")
-        .object::<RequestEventSender>(&ctx, Some(Box::new(sender)));
+        .object::<HttpResponseChannel>(&ctx, Some(Box::new(sender)));
 
     let object = JSObject::new(&ctx);
     object.set_property("request", &request_object, Default::default())?;
@@ -358,7 +146,7 @@ fn op_read_async_request_event(
 ) -> JSResult<JSValue> {
     let state = downcast_state(&ctx);
     let mut reader =
-        match downcast_ref::<UnboundedBufferChannelReader<RequestEvent>>(&reader) {
+        match downcast_ref::<UnboundedBufferChannelReader<HttpRequestEvent>>(&reader) {
             Some(reader) => reader,
             None => {
                 return Err(js_error_typ!(
@@ -379,8 +167,11 @@ fn op_read_async_request_event(
             let mut event = match event {
                 Ok(event) => event,
                 Err(err) => match err {
-                    StreamError::Empty => {
-                        let _ = callback.call(None, &[js_undefined!(&ctx)])?;
+                    StreamError::Closed | StreamError::Empty => {
+                        let _ = callback.call(
+                            None,
+                            &[js_undefined!(&ctx), JSValue::number(&ctx, err.into())],
+                        )?;
                         callback.unprotect();
                         return Ok(());
                     }
@@ -393,18 +184,15 @@ fn op_read_async_request_event(
                 },
             };
 
-            let sender = event.sender.take().expect("Failed to take sender");
-            // let request =
-            //     FetchRequest::from_event(event).expect("Failed to convert request");
-
+            let sender = event.channel.take().expect("Failed to take sender");
             let request_object = classes
                 .get(HttpRequestResource::CLASS_NAME)
-                .expect("FetchResponse class not found")
+                .expect("HttpRequestResource class not found")
                 .object::<HttpRequest>(&ctx, Some(Box::new(HttpRequest::new(event.req))));
             let sender_object = classes
                 .get(RequestEventResource::CLASS_NAME)
                 .expect("RequestEventResource class not found")
-                .object::<RequestEventSender>(&ctx, Some(Box::new(sender)));
+                .object::<HttpResponseChannel>(&ctx, Some(Box::new(sender)));
 
             let object = JSObject::new(&ctx);
             object.set_property("request", &request_object, Default::default())?;
@@ -416,6 +204,34 @@ fn op_read_async_request_event(
     });
 
     Ok(js_undefined!(&ctx))
+}
+
+async fn handle_server_shutdown(
+    server: HttpServer,
+    mut signal: Option<OneshotSignal>,
+) -> NativeJob {
+    let shutdown = server.listen();
+
+    tokio::select! {
+        // Handle Ctrl-C signal
+        _ = tokio::signal::ctrl_c() => {
+            println!("\nReceived Ctrl-C, shutting down server...");
+            shutdown.shutdown();
+        }
+        _ = poll_fn(move |cx| {
+            if let Some(sig) = signal.as_mut() {
+                return sig.poll_signal(cx)
+            } else {
+                // Never resolves if no signal is provided
+                std::task::Poll::Pending
+            }
+        }) => {
+            println!("Received shutdown signal, shutting down server...");
+            shutdown.shutdown();
+        }
+    }
+
+    NativeJob::new(|_| Ok(()))
 }
 
 #[callback]
@@ -430,87 +246,49 @@ fn op_internal_start_server(
     let options = ServerOptions::from_value(&options_args, &ctx)?;
     let signal = options_args.as_object()?.get_property("signal")?;
     let mut internal_signal = None;
-    if !signal.is_undefined() && signal.is_object() {
+    if !signal.is_null() && signal.is_object() {
         let signal = signal.as_object()?;
         signal.protect();
-        let oneshot_signal = downcast_ref::<InternalSignal>(&signal)
-            .map(|mut signal| signal.as_mut().get_signal());
-        if let Some(signal) = oneshot_signal {
-            internal_signal = signal;
-        }
+
+        internal_signal = match downcast_ref::<InternalSignal>(&signal) {
+            Some(mut internal) => internal.get_signal(),
+            None => return Err(js_error!(&ctx, "Invalid Signal Object").into()),
+        };
     }
 
-    let server = HttpServerBuilder::new()
-        .addr(HttpSocketAddr::IpSocket(options.address()))
-        .start();
+    let server = HttpServerBuilder::new(HttpSocketAddr::IpSocket(options.address()))
+        .config(HttpConfig::default())
+        .bind();
 
-    let mut channel: UnboundedBufferChannel<RequestEvent> = UnboundedBufferChannel::new();
-    let writer = channel.writer().unwrap();
-    let reader = channel.acquire_reader().unwrap();
-
-    let state = downcast_state(&ctx);
-    let reader_object = state
-        .classes()
-        .get(UnboundedBufferChannelReaderResource::CLASS_NAME)
-        .unwrap()
-        .object(&ctx, Some(Box::new(reader)));
-
-    enqueue_job!(state, async move {
+    enqueue_job!(downcast_state(&ctx), async move {
         let server = server.await;
-        // {
-        //     Ok(server) => server,
-        //     Err(err) => {
-        //         // let err_value = JSError::with_message(&ctx, format!("{}", err)).unwrap();
-        //         // resolver.reject(None, &[err_value.into()])?;
-        //         // return Ok(());
-        //     }
-        // };
-        // let (mut handler, mut receiver) = server.await.accept().unwrap();
 
         native_job!("op_internal_start_server", move |ctx| {
             let state = downcast_state(&ctx);
-            // let job_queue = state.job_queue().borrow().borrow_mut().leak();
 
             match server {
-                Ok(http_server) => {
-                    let accepter = http_server.accept();
-                    match accepter {
-                        Ok((handler, receiver)) => {
-                            let accepter = HttpAccepterBuilder::new()
-                                .handler(handler)
-                                .receiver(receiver)
-                                .signal(internal_signal.unwrap())
-                                .stream(writer)
-                                .build();
+                Ok((http_server, reader)) => {
+                    let reader_object = state
+                        .classes()
+                        .get(NetworkBufferChannelReaderResource::CLASS_NAME)
+                        .expect("NetworkBufferChannelReaderResource not found")
+                        .object(&ctx, Some(Box::new(reader)));
 
-                            let address =
-                                JSValue::string(&ctx, format!("{}", options.address()));
-                            let object = JSObject::new(&ctx);
-                            object.set_property(
-                                "address",
-                                &address,
-                                Default::default(),
-                            )?;
-                            object.set_property(
-                                "reader",
-                                &reader_object,
-                                Default::default(),
-                            )?;
+                    let shutdown_signal =
+                        handle_server_shutdown(http_server, internal_signal);
+                    state.job_queue().borrow().spawn(Box::pin(shutdown_signal));
 
-                            state.job_queue().borrow().spawn(Box::pin(accepter));
-                            callback.call(None, &[js_undefined!(&ctx), object.into()])?;
-                        }
-                        Err(err) => {
-                            let error = js_error!(ctx, format!("{}", err));
-                            callback.call(None, &[error.into()])?;
-                        }
-                    }
+                    let address = JSValue::string(&ctx, format!("{}", options.address()));
+                    let object = JSObject::new(&ctx);
+                    object.set_property("address", &address, Default::default())?;
+                    object.set_property("reader", &reader_object, Default::default())?;
+                    callback.call(None, &[js_undefined!(&ctx), object.into()])?;
                 }
                 Err(err) => {
                     let error = js_error!(ctx, format!("{}", err));
                     callback.call(None, &[error.into()])?;
                 }
-            }
+            };
 
             callback.unprotect();
             Ok(())
@@ -615,7 +393,7 @@ impl RequestEventResource {
             None => Err(JSError::new_typ(&ctx, "RequestEvent class not found")?)?,
         };
 
-        let object = class.object::<RequestEventSender>(&ctx, None);
+        let object = class.object::<HttpResponseChannel>(&ctx, None);
         object.set_prototype(&constructor);
         Ok(object.into())
     }
@@ -635,7 +413,7 @@ fn op_send_event_response(
         Err(err) => return Err(JSError::new_typ(&ctx, format!("{}", err))?)?,
     };
 
-    let http_sender = match downcast_ref::<RequestEventSender>(&sender) {
+    let http_sender = match downcast_ref::<HttpResponseChannel>(&sender) {
         Some(sender) => sender.take(),
         None => {
             return Err(js_error_typ!(
@@ -647,87 +425,4 @@ fn op_send_event_response(
 
     let _ = http_sender.send(http_response);
     Ok(JSValue::undefined(&ctx))
-}
-
-#[cfg(test)]
-mod tests {
-    use futures::{future::poll_fn, stream::FuturesUnordered, StreamExt};
-    use std::{
-        future::Future,
-        pin::Pin,
-        task::{Context, Poll, Waker},
-    };
-    use tokio::sync::mpsc::UnboundedReceiver;
-
-    pub struct HttpAccepter {
-        receiver: UnboundedReceiver<String>,
-        count: usize,
-        waker: Option<Waker>,
-    }
-
-    impl HttpAccepter {
-        pub fn new(receiver: UnboundedReceiver<String>) -> Self {
-            Self {
-                receiver,
-                count: 0,
-                waker: None,
-            }
-        }
-
-        pub fn wake(&mut self) {
-            if let Some(waker) = self.waker.take() {
-                waker.wake();
-            }
-        }
-    }
-
-    impl Future for HttpAccepter {
-        type Output = ();
-
-        fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-            self.waker = Some(cx.waker().clone());
-
-            while let Poll::Ready(Some(event)) = self.receiver.poll_recv(cx) {
-                self.count += 1;
-                // Handle the event
-                println!("Received event: {:?}", event);
-            }
-
-            if self.count > 3 {
-                return Poll::Ready(());
-            }
-
-            Poll::Pending
-        }
-    }
-
-    #[tokio::test]
-    async fn test_http_accepter() {
-        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
-        let accepter = Box::pin(HttpAccepter::new(receiver));
-        let mut queue = FuturesUnordered::new();
-
-        // let waker = futures::task::noop_waker();
-        // let cx = std::task::Context::from_waker(&waker);
-
-        sender.send(String::from("Hello")).unwrap();
-
-        queue.push(accepter);
-        poll_fn(move |cx| {
-            // let result = accepter.as_mut().poll(cx);
-            // sender.send(String::from("Hello")).unwrap();
-            // result
-            while let Poll::Ready(Some(_)) = queue.poll_next_unpin(cx) {
-                println!("The accepter has been polled");
-            }
-
-            sender.send(String::from("Hello")).unwrap();
-            if queue.is_empty() {
-                Poll::Ready(())
-            } else {
-                Poll::Pending
-            }
-        })
-        .await;
-    }
 }

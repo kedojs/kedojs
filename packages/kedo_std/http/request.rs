@@ -326,7 +326,9 @@ impl HttpRequestBuilder {
 
 #[cfg(test)]
 mod tests {
-    use crate::BoundedBufferChannel;
+    use crate::buffer_channel::BufferChannel;
+    use crate::buffer_channel::BufferChannelWriter;
+    use crate::UnboundedBufferChannel;
 
     use super::*;
     use futures::StreamExt;
@@ -384,8 +386,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_request_builder_with_stream() {
-        let mut internal_stream = BoundedBufferChannel::new(10);
-        internal_stream.try_write(vec![1, 2, 3, 4]).unwrap();
+        let mut internal_stream = UnboundedBufferChannel::new();
+        let stream_writer = internal_stream.writer().unwrap();
+        stream_writer.try_write(vec![1, 2, 3, 4]).unwrap();
 
         let mut headers = HeaderMap::new();
         headers.insert("Content-Type", "application/json".parse().unwrap());
@@ -396,7 +399,7 @@ mod tests {
             .headers(headers)
             .body(RequestBody::Stream(
                 internal_stream
-                    .aquire_reader()
+                    .acquire_reader()
                     .map(StreamDecoder::internal_stream),
             ))
             .build()

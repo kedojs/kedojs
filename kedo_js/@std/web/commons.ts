@@ -62,5 +62,5 @@ export {
     _signal,
     decodedStreamToReadableStream,
     HTTP_METHODS,
-    isExtractedBody
+    isExtractedBody,
 };

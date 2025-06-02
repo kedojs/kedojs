@@ -4,8 +4,8 @@ use bytes::Bytes;
 use hyper::Uri;
 use kedo_core::downcast_state;
 use kedo_std::{
-    BoundedBufferChannel, HttpResponse, InternalBodyStream, ResponseBody, StreamDecoder,
-    StreamEncoder,
+    BufferChannel, HttpResponse, InternalBodyStream, ResponseBody, StreamDecoder,
+    StreamEncoder, UnboundedBufferChannel,
 };
 use kedo_utils::downcast_ref;
 use rust_jsc::{JSArray, JSContext, JSError, JSObject, JSResult, JSTypedArray, JSValue};
@@ -25,14 +25,14 @@ impl ResponseBodyExt for ResponseBody {
             let buffer = JSTypedArray::from(source);
             Ok(ResponseBody::Bytes(Bytes::from(buffer.as_vec()?)))
         } else if object.has_property("stream") {
-            let stream = downcast_ref::<BoundedBufferChannel<Vec<u8>>>(
+            let stream = downcast_ref::<UnboundedBufferChannel<Vec<u8>>>(
                 &object.get_property("stream")?.as_object()?,
             );
             let mut stream = match stream {
                 Some(stream) => stream,
                 None => return Ok(ResponseBody::None),
             };
-            let reader = match stream.as_mut().aquire_reader() {
+            let reader = match stream.as_mut().acquire_reader() {
                 Some(reader) => reader,
                 None => return Ok(ResponseBody::None),
             };

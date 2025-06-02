@@ -1,5 +1,5 @@
 use crate::http::errors::FetchError;
-use crate::BoundedBufferChannelReader;
+use crate::UnboundedBufferChannelReader;
 use bytes::Bytes;
 use futures::Stream;
 use http_body_util::combinators::BoxBody;
@@ -54,7 +54,7 @@ impl IncomingBodyStream {
 }
 
 #[derive(Debug)]
-pub struct InternalBodyStream(BoundedBufferChannelReader<Vec<u8>>);
+pub struct InternalBodyStream(UnboundedBufferChannelReader<Vec<u8>>);
 
 impl Stream for InternalBodyStream {
     type Item = Result<Bytes, FetchError>;
@@ -87,7 +87,7 @@ impl Stream for InternalBodyStream {
 }
 
 impl InternalBodyStream {
-    pub fn new(stream: BoundedBufferChannelReader<Vec<u8>>) -> Self {
+    pub fn new(stream: UnboundedBufferChannelReader<Vec<u8>>) -> Self {
         InternalBodyStream(stream)
     }
 }

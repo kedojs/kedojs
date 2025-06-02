@@ -9,7 +9,6 @@ use std::borrow::Cow;
 pub enum ResponseBody {
     None,
     Bytes(Bytes),
-    // Stream(InternalBodyStream),
     DecodedStream(StreamDecoder),
     EncodedStream(StreamEncoder),
 }

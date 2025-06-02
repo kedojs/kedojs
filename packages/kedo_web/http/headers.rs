@@ -17,8 +17,14 @@ impl HeadersMapExt<hyper::header::HeaderMap> for hyper::header::HeaderMap {
         let mut response_headers: Vec<rust_jsc::JSValue> = vec![];
         for (key, value) in self.iter() {
             let key = rust_jsc::JSValue::string(ctx, JSString::from(key.as_str()));
-            let value =
-                rust_jsc::JSValue::string(ctx, JSString::from(value.to_str().unwrap()));
+            let value = rust_jsc::JSValue::string(
+                ctx,
+                JSString::from(
+                    value
+                        .to_str()
+                        .expect("Failed to convert header value to string"),
+                ),
+            );
             let header = JSArray::new_array(ctx, &[key, value])?;
             // We need to protect the header object to prevent it from being garbage collected
             header.protect();

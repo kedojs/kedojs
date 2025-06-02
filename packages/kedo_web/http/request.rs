@@ -4,8 +4,9 @@ use bytes::Bytes;
 use kedo_core::{define_exports, downcast_state};
 use kedo_macros::js_class;
 use kedo_std::{
-    BoundedBufferChannel, FetchError, HttpRequest, HttpRequestBuilder,
-    IncomingBodyStream, RequestBody, RequestEvent, RequestRedirect, StreamDecoder,
+    BufferChannel, FetchError, HttpRequest, HttpRequestBuilder, HttpRequestEvent,
+    IncomingBodyStream, RequestBody, RequestRedirect, StreamDecoder,
+    UnboundedBufferChannel,
 };
 use kedo_utils::downcast_ref;
 use rust_jsc::{
@@ -15,7 +16,7 @@ use std::mem::ManuallyDrop;
 
 pub trait HttpRequestExt {
     fn from_value(value: &JSValue, ctx: &JSContext) -> JSResult<HttpRequest>;
-    fn from_event(value: RequestEvent) -> Result<HttpRequest, FetchError>;
+    fn from_event(value: HttpRequestEvent) -> Result<HttpRequest, FetchError>;
 }
 
 impl HttpRequestExt for HttpRequest {
@@ -35,14 +36,15 @@ impl HttpRequestExt for HttpRequest {
             .get_property("keep_alive")
             .and_then(|v| Ok(v.as_boolean()))
             .unwrap_or(false);
-        let uri = url
-            .parse::<hyper::Uri>()
-            .map_err(|_| JSError::new_typ(&ctx, "Invalid URL").unwrap())?;
+        let uri = match url.parse::<hyper::Uri>() {
+            Ok(uri) => uri,
+            Err(_) => return Err(JSError::new_typ(&ctx, "Invalid URL")?),
+        };
         let header_list = request.get_property("header_list")?.as_object()?;
 
         let headers = hyper::HeaderMap::from_array(JSArray::new(header_list))?;
         let body = RequestBody::from_object(&request)?;
-        let request = HttpRequestBuilder::new()
+        let request = match HttpRequestBuilder::new()
             .method(method)
             .uri(uri)
             .headers(headers)
@@ -50,12 +52,15 @@ impl HttpRequestExt for HttpRequest {
             .redirect(redirect)
             .body(body)
             .build()
-            .map_err(|e| JSError::new_typ(&ctx, e).unwrap())?;
+        {
+            Ok(request) => request,
+            Err(_) => return Err(JSError::new_typ(&ctx, "Invalid request")?),
+        };
 
         Ok(request)
     }
 
-    fn from_event(value: RequestEvent) -> Result<HttpRequest, FetchError> {
+    fn from_event(value: HttpRequestEvent) -> Result<HttpRequest, FetchError> {
         // Clone necessary parts before consuming the body
         let method = value.req.method().clone();
         let uri = value.req.uri().clone();
@@ -108,7 +113,7 @@ impl RequestBodyExt for RequestBody {
                 let class = state
                     .classes()
                     .get(DecodedStreamResource::CLASS_NAME)
-                    .unwrap();
+                    .expect("DecodedStreamResource class not found");
 
                 let body_object =
                     class.object::<StreamDecoder>(ctx, Some(Box::new(stream)));
@@ -124,14 +129,14 @@ impl RequestBodyExt for RequestBody {
             let buffer = JSTypedArray::from(source);
             Ok(RequestBody::Bytes(Bytes::from(buffer.as_vec()?)))
         } else if obj.has_property("stream") {
-            let stream = downcast_ref::<BoundedBufferChannel<Vec<u8>>>(
+            let stream = downcast_ref::<UnboundedBufferChannel<Vec<u8>>>(
                 &obj.get_property("stream")?.as_object()?,
             );
             Ok(stream
                 .map(|mut s| {
                     RequestBody::Stream(
                         s.as_mut()
-                            .aquire_reader()
+                            .acquire_reader()
                             .map(StreamDecoder::internal_stream),
                     )
                 })
@@ -265,7 +270,6 @@ fn op_http_request_body(
     _: JSObject,
     request: JSObject,
 ) -> JSResult<JSValue> {
-    // println!("[Kevin] - op_http_request_body: Body");
     let client = downcast_ref::<HttpRequest>(&request);
     let mut client = match client {
         Some(client) => client,

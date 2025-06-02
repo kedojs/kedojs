@@ -1,7 +1,4 @@
-import {
-    isDisturbed,
-    ReadableStream
-} from "@kedo:int/std/stream";
+import { isDisturbed, ReadableStream } from "@kedo:int/std/stream";
 import { TextEncoder } from "./TextDecoder";
 
 const isReadableStream = (object: any): object is ReadableStream =>
@@ -131,7 +128,12 @@ class InternalBody {
 
 const encoder = new TextEncoder();
 
-type BodyInit = ArrayBuffer | ArrayBufferView | string | URLSearchParams | ReadableStream;
+type BodyInit =
+    | ArrayBuffer
+    | ArrayBufferView
+    | string
+    | URLSearchParams
+    | ReadableStream;
 
 // TODO: this implementation must be optimized
 function extractBody(
@@ -184,9 +186,16 @@ function extractBody(
     return { body, type };
 }
 
-const mixinBody = (input: MixingBodyInput, _bodyKey: keyof MixingBodyInput, consumed = false) => {
+const mixinBody = (
+    input: MixingBodyInput,
+    _bodyKey: keyof MixingBodyInput,
+    consumed = false,
+) => {
     const body = input[_bodyKey] as any as ExtractedBody | null;
-    const innerBody = new InternalBody(body?.stream || body?.source || null, consumed);
+    const innerBody = new InternalBody(
+        body?.stream || body?.source || null,
+        consumed,
+    );
 
     const mixin = {
         body: {

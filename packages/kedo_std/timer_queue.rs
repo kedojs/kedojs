@@ -179,7 +179,7 @@ where
             // 1. remove timer and callbacks from the map if timer type is Timeout
             // check if the timer type is Timeout before removing it dont call the remove method
             // get the timer data from the timers map
-            let data = timers.remove(&key).unwrap();
+            let data = timers.remove(&key).expect("timer not found");
             let mut ref_counter = self.ref_count.get();
 
             for timer in data {

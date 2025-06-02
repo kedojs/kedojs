@@ -1,19 +1,15 @@
-
 import { asyncOp } from "@kedo/utils";
 import {
     isInReadableState,
-    readableStreamResource
+    readableStreamResource,
 } from "@kedo:int/std/stream";
 import {
     InternalSignal,
     op_internal_fetch,
     op_new_fetch_client,
-    op_send_signal
+    op_send_signal,
 } from "@kedo:op/web";
-import {
-    decodedStreamToReadableStream,
-    isExtractedBody
-} from "./commons";
+import { decodedStreamToReadableStream, isExtractedBody } from "./commons";
 import { InnerRequest, Request, RequestInfo, toInnerRequest } from "./Request";
 import { createResponse, InnerResponse, Response } from "./Response";
 
@@ -39,7 +35,12 @@ function fetch(input: RequestInfo, init?: RequestInit): Promise<Response> {
         if (requestObject.signal && requestObject.signal.aborted) {
             // const error = new Error("The operation was aborted.") as any;
             // error.name = "AbortError";
-            abortFetch(reject, request as any, null, requestObject.signal.reason);
+            abortFetch(
+                reject,
+                request as any,
+                null,
+                requestObject.signal.reason,
+            );
             return;
         }
 
@@ -56,7 +57,10 @@ function fetch(input: RequestInfo, init?: RequestInit): Promise<Response> {
         }
 
         if (!requestObject.headers.has("Accept-Encoding")) {
-            request.header_list.push(["Accept-Encoding", "gzip, deflate, zstd, br"]);
+            request.header_list.push([
+                "Accept-Encoding",
+                "gzip, deflate, zstd, br",
+            ]);
         }
 
         // 3. Set up for aborting if signal is later triggered
@@ -71,7 +75,12 @@ function fetch(input: RequestInfo, init?: RequestInit): Promise<Response> {
             }
 
             op_send_signal(internalSignal);
-            abortFetch(reject, request as any, null, requestObject.signal.reason);
+            abortFetch(
+                reject,
+                request as any,
+                null,
+                requestObject.signal.reason,
+            );
         }
 
         try {
@@ -123,18 +132,18 @@ function abortFetch(
 
     // If request body is readable, cancel it
     if (request.body) {
-        request.body.cancel(error).catch((error) => { });
+        request.body.cancel(error).catch((error) => {});
     }
 
     if (response === null) return;
 
     // If response body is readable, error it
     if (response.body && isInReadableState(response.body)) {
-        response.body.cancel(error).catch((error) => { });
+        response.body.cancel(error).catch((_error) => {});
     }
 }
 
-// Stub for the actual network fetch operation
+// network fetch operation
 async function performFetch(
     request: InnerRequest,
     internalSignal?: InternalSignal,
@@ -154,7 +163,11 @@ async function performFetch(
         }
     }
 
-    const fetchResponse = await asyncOp(op_internal_fetch, client, fetchRequest);
+    const fetchResponse = await asyncOp(
+        op_internal_fetch,
+        client,
+        fetchRequest,
+    );
 
     let responseBody: ExtractedBody | null = null;
     if (fetchResponse.body) {
@@ -178,10 +191,9 @@ async function performFetch(
         },
         urlList: request.urlList,
         status: fetchResponse.status,
-        statusMessage: fetchResponse.status_message,
+        statusMessage: fetchResponse.status_message || "",
         headerList: fetchResponse.headers,
         body: responseBody,
-        cacheState: "",
     };
     return response;
 }

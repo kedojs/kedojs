@@ -1,10 +1,8 @@
 use futures::Stream;
-// use std::future::Future;
 use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-
 use tokio::net::{TcpListener as TokioTcpListener, TcpStream};
 
 /// Options for configuring TCP sockets
@@ -61,7 +59,6 @@ impl Default for TcpOptions {
 /// A TCP socket server
 #[derive(Debug)]
 pub struct TcpListener {
-    // socker: tokio::net::TcpSocket,
     listener: TokioTcpListener,
     options: TcpOptions,
 }

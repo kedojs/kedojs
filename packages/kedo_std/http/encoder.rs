@@ -1,6 +1,5 @@
 use crate::http::body::InternalBodyStream;
 use crate::http::errors::FetchError;
-// use crate::http::headers::HeadersMap;
 use async_compression::tokio::bufread::BrotliEncoder;
 use async_compression::tokio::bufread::GzipEncoder;
 use async_compression::tokio::bufread::ZlibEncoder;
@@ -96,8 +95,10 @@ impl StreamEncoder {
 
     /// https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Accept-Encoding
     /// Weighted Accept-Encoding values
-    /// The following header shows Accept-Encoding preferences using a quality value between 0 (lowest priority) and 1 (highest-priority).
-    /// Brotli compression is weighted at 1.0, making br the client's first choice, followed by gzip at 0.8 priority, and then any other content encoding at 0.1:
+    /// The following header shows Accept-Encoding preferences using a quality value
+    /// between 0 (lowest priority) and 1 (highest-priority).
+    /// Brotli compression is weighted at 1.0, making br the client's first choice,
+    /// followed by gzip at 0.8 priority, and then any other content encoding at 0.1:
     /// HTTP
     /// Accept-Encoding: br;q=1.0, gzip;q=0.8, *;q=0.1ƒ
     fn detect_encoding(headers: &hyper::HeaderMap) -> Option<EncoderType> {
@@ -256,18 +257,21 @@ impl Body for StreamEncoder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::BoundedBufferChannel;
+    use crate::buffer_channel::BufferChannel;
+    use crate::buffer_channel::BufferChannelWriter;
+    use crate::UnboundedBufferChannel;
     use futures::StreamExt;
     use hyper::header::ACCEPT_ENCODING;
 
     #[tokio::test]
     async fn test_stream_encoder_plain() {
-        let mut stream = BoundedBufferChannel::<Vec<u8>>::new(5);
+        let mut stream = UnboundedBufferChannel::<Vec<u8>>::new();
+        let sender = stream.writer().unwrap();
         for i in b"hello".to_vec() {
-            stream.try_write(vec![i]).unwrap();
+            sender.try_write(vec![i]).unwrap();
         }
         let encoder = StreamEncoder::plain(InternalBodyStream::new(
-            stream.aquire_reader().take().unwrap(),
+            stream.acquire_reader().take().unwrap(),
         ));
         stream.close();
 
@@ -298,43 +302,38 @@ mod tests {
     async fn test_stream_encoder_detect() {
         let mut headers = hyper::HeaderMap::new();
         headers.append(ACCEPT_ENCODING, "gzip".parse().unwrap());
-        // HeadersMap::new(vec![(accept.clone(), "gzip".to_string())]);
 
-        let mut stream = BoundedBufferChannel::<Vec<u8>>::new(5);
-        let b_stream = InternalBodyStream::new(stream.aquire_reader().unwrap());
+        let mut stream = UnboundedBufferChannel::<Vec<u8>>::new();
+        let b_stream = InternalBodyStream::new(stream.acquire_reader().unwrap());
         let encoder = StreamEncoder::detect(b_stream, &headers);
         assert!(matches!(encoder.inner, Inner::Gzip(_)));
 
         let mut headers = hyper::HeaderMap::new();
         headers.append(ACCEPT_ENCODING, "br, deflate".parse().unwrap());
-        let mut stream = BoundedBufferChannel::<Vec<u8>>::new(5);
-        let b_stream = InternalBodyStream::new(stream.aquire_reader().unwrap());
+        let mut stream = UnboundedBufferChannel::<Vec<u8>>::new();
+        let b_stream = InternalBodyStream::new(stream.acquire_reader().unwrap());
         let encoder = StreamEncoder::detect(b_stream, &headers);
         assert!(matches!(encoder.inner, Inner::Brotli(_)));
 
         let mut headers = hyper::HeaderMap::new();
         headers.append(ACCEPT_ENCODING, "gzip;q=0.8".parse().unwrap());
         headers.append(ACCEPT_ENCODING, "zstd;q=1.0, deflate".parse().unwrap());
-        let mut stream = BoundedBufferChannel::<Vec<u8>>::new(5);
-        let b_stream = InternalBodyStream::new(stream.aquire_reader().unwrap());
+        let mut stream = UnboundedBufferChannel::<Vec<u8>>::new();
+        let b_stream = InternalBodyStream::new(stream.acquire_reader().unwrap());
         let encoder = StreamEncoder::detect(b_stream, &headers);
         assert!(matches!(encoder.inner, Inner::Zstd(_)));
     }
 
     #[tokio::test]
     async fn test_stream_encoder_detect_multiple_encodings() {
-        let mut stream = BoundedBufferChannel::<Vec<u8>>::new(5);
+        let mut stream = UnboundedBufferChannel::<Vec<u8>>::new();
         let mut headers = hyper::HeaderMap::new();
         headers.append(
             ACCEPT_ENCODING,
             "gzip;q=0.8, br;q=1.0, *;q=0.1".parse().unwrap(),
         );
-        // let headers = HeadersMap::new(vec![(
-        //     ACCEPT_ENCODING.to_string(),
-        //     "gzip;q=0.8, br;q=1.0, *;q=0.1".to_string(),
-        // )]);
 
-        let b_stream = InternalBodyStream::new(stream.aquire_reader().unwrap());
+        let b_stream = InternalBodyStream::new(stream.acquire_reader().unwrap());
         let encoder = StreamEncoder::detect(b_stream, &headers);
         assert!(encoder.encoding().is_some());
         assert_eq!(encoder.encoding().unwrap(), EncoderType::Brotli);

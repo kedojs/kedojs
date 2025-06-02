@@ -214,7 +214,10 @@ class Request {
         // 37. If init["body"] exists and is non-null, then:
         if (init?.body !== undefined && init.body !== null) {
             // 37.1. Let bodyWithType be the result of extracting init["body"], with keepalive set to request’s keepalive.
-            const bodyWithType = extractBody(init.body as any, request.keepalive);
+            const bodyWithType = extractBody(
+                init.body as any,
+                request.keepalive,
+            );
             // 37.2. Set initBody to bodyWithType.body.
             initBody = bodyWithType.body as any;
             // 37.3. Let type be bodyWithType’s type.
@@ -304,6 +307,10 @@ class Request {
 
     get duplex(): string {
         return "half";
+    }
+
+    get credentials(): RequestCredentials {
+        return "same-origin";
     }
 
     // TODO: Implement the clone method after supporting the tee method for ReadableStream

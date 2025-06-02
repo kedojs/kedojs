@@ -1,6 +1,6 @@
 use crate::http::body::IncomingBodyStream;
 use crate::http::errors::FetchError;
-use crate::BoundedBufferChannelReader;
+use crate::UnboundedBufferChannelReader;
 use async_compression::tokio::bufread::BrotliDecoder;
 use async_compression::tokio::bufread::GzipDecoder;
 use async_compression::tokio::bufread::ZlibDecoder;
@@ -53,7 +53,7 @@ enum Inner {
     Zstd(Pin<Box<FramedRead<ZstdDecoder<IncomingStreamReader>, BytesCodec>>>),
     Deflate(Pin<Box<FramedRead<ZlibDecoder<IncomingStreamReader>, BytesCodec>>>),
     Plain(IncomingBodyStream),
-    InternalStream(BoundedBufferChannelReader<Vec<u8>>),
+    InternalStream(UnboundedBufferChannelReader<Vec<u8>>),
 }
 
 impl StreamDecoder {
@@ -95,7 +95,7 @@ impl StreamDecoder {
         }
     }
 
-    pub fn internal_stream(stream: BoundedBufferChannelReader<Vec<u8>>) -> Self {
+    pub fn internal_stream(stream: UnboundedBufferChannelReader<Vec<u8>>) -> Self {
         Self {
             inner: Inner::InternalStream(stream),
         }

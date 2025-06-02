@@ -273,10 +273,12 @@ impl FetchClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::buffer_channel::BufferChannel;
+    use crate::buffer_channel::BufferChannelWriter;
     use crate::http::request::HttpRequestBuilder;
     use crate::http::request::{RequestBody, RequestRedirect};
     use crate::http::tests::test_utils::start_test_server;
-    use crate::BoundedBufferChannel;
+    use crate::UnboundedBufferChannel;
     use bytes::Bytes;
     use futures::stream::StreamExt;
     use futures::TryStreamExt;
@@ -410,8 +412,9 @@ mod tests {
     #[tokio::test]
     async fn test_fetch_redirect_with_stream_body() {
         let client = FetchClient::new();
-        let mut internal_stream = BoundedBufferChannel::new(10);
-        internal_stream.try_write(vec![1, 2, 3, 4]).unwrap();
+        let mut internal_stream = UnboundedBufferChannel::new();
+        let sender = internal_stream.writer().unwrap();
+        sender.try_write(vec![1, 2, 3, 4]).unwrap();
         let mut headers = hyper::header::HeaderMap::new();
         headers.insert("Content-Type", HeaderValue::from_static("application/json"));
         let request = HttpRequestBuilder::new()
@@ -420,7 +423,7 @@ mod tests {
             .headers(headers)
             .body(RequestBody::Stream(
                 internal_stream
-                    .aquire_reader()
+                    .acquire_reader()
                     .map(StreamDecoder::internal_stream),
             ))
             .redirect(RequestRedirect::Follow)
@@ -472,8 +475,9 @@ mod tests {
     #[tokio::test]
     async fn test_fetch_redirect_with_stream_error() {
         let client = FetchClient::new();
-        let mut internal_stream = BoundedBufferChannel::new(10);
-        internal_stream.try_write(vec![1, 2, 3, 4]).unwrap();
+        let mut internal_stream = UnboundedBufferChannel::new();
+        let sender = internal_stream.writer().unwrap();
+        sender.try_write(vec![1, 2, 3, 4]).unwrap();
         let mut headers = hyper::header::HeaderMap::new();
         headers.insert("Content-Type", HeaderValue::from_static("application/json"));
         headers.insert("X-Redirect-Status", HeaderValue::from_static("302"));
@@ -483,7 +487,7 @@ mod tests {
             .headers(headers)
             .body(RequestBody::Stream(
                 internal_stream
-                    .aquire_reader()
+                    .acquire_reader()
                     .map(StreamDecoder::internal_stream),
             ))
             .redirect(RequestRedirect::Follow)

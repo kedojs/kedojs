@@ -15,8 +15,7 @@ let id = setTimeout(() => {
 
 timeouts.forEach((duration, index) => {
     setTimeout(() => {
-
-        Kedo.readFile("tests/filesystem/data.txt").then((context) => {
+        Kedo.readFile("tests/filesystem/data.txt").then((_) => {
             console.log(context3);
             setTimeout(() => {
                 console.log("After Context Log: %d executed", index + 1);
@@ -26,14 +25,11 @@ timeouts.forEach((duration, index) => {
         console.log(`Timeout ${index + 1} executed`);
         setTimeout(() => {
             console.log("Timeout Inner %d executed", index + 1);
-        }
-            , 1000);
-
+        }, 1000);
     }, duration);
-}
-);
+});
 
-Kedo.readFile("tests/filesystem/data.txt").then((context) => {
+Kedo.readFile("tests/filesystem/data.txt").then((_) => {
     console.log("context4");
     setTimeout(() => {
         console.log("OutSide : %d executed", 8);
@@ -43,19 +39,21 @@ Kedo.readFile("tests/filesystem/data.txt").then((context) => {
                 console.log("Deep level 2 : %d executed", 8);
                 setTimeout(() => {
                     console.log("Deep level 3 : %d executed", 8);
-                    setTimeout(() => {
-                        console.log("Deep level 5 : %d executed", 8);
-                    }, 1000);
+                    setTimeout(
+                        () => console.log("Deep level 5 : %d executed", 8),
+                        1000,
+                    );
                 }, 1000);
-                setTimeout(() => {
-                    console.log("Deep level 4 : %d executed", 8);
-                }, 1000);
+                setTimeout(
+                    () => console.log("Deep level 4 : %d executed", 8),
+                    1000,
+                );
             }, 1000);
         }, 1000);
     }, 1000);
 });
 
-Kedo.readFile("tests/filesystem/data.txt").then((context) => {
+Kedo.readFile("tests/filesystem/data.txt").then((_) => {
     console.log("context5");
     setTimeout(() => {
         console.log("OutSide: %d executed", 9);

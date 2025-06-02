@@ -1,4 +1,3 @@
-// use bundler::BundleArgs;
 use clap::{Parser, Subcommand};
 use kedo_runtime::runtime::Runtime;
 
@@ -17,10 +16,9 @@ struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
 
-    /// Sets a custom config file
+    // Sets a custom config file
     // #[arg(short, long, value_name = "FILE")]
     // config: Option<PathBuf>,
-
     /// Turn debugging information on
     #[arg(short, long, action = clap::ArgAction::Count)]
     debug: u8,
@@ -76,42 +74,21 @@ fn main() {
             let mut runtime = Runtime::new();
             runtime.add_loader(std_loader::StdModuleLoader::default());
             // Load the standard library
-            // let result =
-            //     runtime.evaluate_module_from_source(STD_INDEX, "src/@std/index.js", None);
-            let result = runtime.evaluate_module("./build/@std/dist/index.js");
+            let result =
+                runtime.evaluate_module_from_source(STD_INDEX, "src/@std/index.js", None);
+            // let result = runtime.evaluate_module("./build/@std/dist/index.js");
             match result {
-                Ok(_) => {
-                    println!("Standard library loaded");
-                }
+                Ok(_) => {}
                 Err(e) => {
                     println!("Error: {}", e.message().unwrap());
                 }
             }
-            // assert!(result.is_ok());
-            // println!(
-            //     "Result Check: {:?}",
-            //     runtime.check_syntax("console.log('Kevin')", None).unwrap()
-            // );
+
             create_tokio_runtime().block_on(async {
                 let result = runtime.evaluate_module(file);
-                println!("Result: {:?}", "Complete");
                 match result {
                     Ok(_) => {
-                        println!("Exact");
-                        // create_tokio_runtime().block_on(async {
                         runtime.idle().await;
-                        // });
-                        // runtime.idle().await;
-                        println!("Idle: {:?}", "Complete");
-                        // sleep(std::time::Duration::from_secs(5));
-                        // println!(
-                        //     "Result Check: {:?}",
-                        //     runtime.check_syntax("console.log('Kevin')", None).unwrap()
-                        // );
-                        // println!(
-                        //     "Result Check: {:?}",
-                        //     runtime.link_and_evaluate("4343").as_string().unwrap()
-                        // );
                     }
                     Err(e) => {
                         println!("Error CLI: {}", e.message().unwrap());
@@ -119,28 +96,28 @@ fn main() {
                 }
             });
         }
-        Some(Commands::Bundle {
-            output,
-            entry,
-            minify,
-        }) => {
-            // let args = BundleArgs {
-            //     external_modules: vec!["@kedo:op/web".to_string()],
-            //     entry: entry.into(),
-            //     output: output.into(),
-            //     minify: *minify,
-            // };
+        // Some(Commands::Bundle {
+        //     output,
+        //     entry,
+        //     minify,
+        // }) => {
+        //     // let args = BundleArgs {
+        //     //     external_modules: vec!["@kedo:op/web".to_string()],
+        //     //     entry: entry.into(),
+        //     //     output: output.into(),
+        //     //     minify: *minify,
+        //     // };
 
-            // let result = bundler::bundle(args);
-            // match result {
-            //     Ok(_) => {
-            //         println!("Bundle complete");
-            //     }
-            //     Err(e) => {
-            //         println!("Error: {}", e);
-            //     }
-            // }
-        }
-        None => {}
+        //     // let result = bundler::bundle(args);
+        //     // match result {
+        //     //     Ok(_) => {
+        //     //         println!("Bundle complete");
+        //     //     }
+        //     //     Err(e) => {
+        //     //         println!("Error: {}", e);
+        //     //     }
+        //     // }
+        // }
+        _ => {}
     }
 }

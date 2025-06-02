@@ -9,9 +9,10 @@ use kedo_timers::Timer;
 use kedo_utils::JSGlobalObject;
 use kedo_web::{
     DecodedStreamResource, EncodingTextDecoder, FetchClientResource,
-    FetchRequestResource, HttpRequestResource, InternalSignal, ReadableStreamResource,
-    ReadableStreamResourceReader, RequestEventResource,
-    UnboundedBufferChannelReaderResource, UrlRecord, WebModule,
+    FetchRequestResource, HttpRequestResource, InternalSignal,
+    NetworkBufferChannelReaderResource, ReadableStreamResource,
+    ReadableStreamResourceReader, RequestEventResource, UnboundedReadableStreamResource,
+    UnboundedReadableStreamResourceReader, UrlRecord, WebModule,
 };
 use rust_jsc::{
     callback, uncaught_exception, uncaught_exception_event_loop, JSContext, JSError,
@@ -150,6 +151,8 @@ impl Runtime {
             .expect("Failed to init EncodingTextDecoder");
         ReadableStreamResourceReader::init_class(class_manager)
             .expect("Failed to init ReadableStreamResourceReader");
+        UnboundedReadableStreamResourceReader::init_class(class_manager)
+            .expect("Failed to init UnboundedReadableStreamResourceReader");
         FetchClientResource::init_class(class_manager)
             .expect("Failed to init FetchClientResource");
         InternalSignal::init_class(class_manager).expect("Failed to init InternalSignal");
@@ -159,12 +162,14 @@ impl Runtime {
             .expect("Failed to init HttpRequestResource");
         ReadableStreamResource::init_class(class_manager)
             .expect("Failed to init JsReadableStream");
+        UnboundedReadableStreamResource::init_class(class_manager)
+            .expect("Failed to init JsUnboundedReadableStream");
         DecodedStreamResource::init_class(class_manager)
             .expect("Failed to init JsResponseBody");
         RequestEventResource::init_class(class_manager)
             .expect("Failed to init RequestEventResource");
-        UnboundedBufferChannelReaderResource::init_class(class_manager)
-            .expect("Failed to init UnboundedBufferChannelReaderResource");
+        NetworkBufferChannelReaderResource::init_class(class_manager)
+            .expect("Failed to init NetworkBufferChannelReaderResource");
     }
 
     fn init_proto(
@@ -174,6 +179,8 @@ impl Runtime {
     ) {
         UrlRecord::init_proto(proto_table, class_table, ctx).unwrap();
         ReadableStreamResource::init_proto(proto_table, class_table, ctx).unwrap();
+        UnboundedReadableStreamResource::init_proto(proto_table, class_table, ctx)
+            .unwrap();
         EncodingTextDecoder::init_proto(proto_table, class_table, ctx).unwrap();
         InternalSignal::init_proto(proto_table, class_table, ctx).unwrap();
     }

@@ -21,7 +21,7 @@ async function testServerListen() {
             hostname: "0.0.0.0",
             port: 8000,
         },
-        async (req) => {
+        async (_req) => {
             // const body = "Hello, World!\n";
             // await readFiles();
             const body = new ReadableStream({
@@ -41,7 +41,7 @@ async function testServerListen() {
 
                     controller.close();
                 },
-                cancel() { },
+                cancel() {},
             });
             // body.pipeThrough(new TextEncoderStream())
             let response = new Response(body, {

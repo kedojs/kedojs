@@ -1,7 +1,7 @@
 type DecodedBodyStream = {};
 
 type RequestEventResource = {};
-type UnboundedBufferChannelReader = {};
+type NetworkBufferChannelReaderResource = {};
 
 type HttpResponse = {
     readonly body?: DecodedBodyStream;
@@ -9,6 +9,7 @@ type HttpResponse = {
     source?: Uint8Array;
     readonly headers: [string, string][];
     readonly status: number;
+    readonly status_message?: string;
     readonly url: string;
 };
 
@@ -30,7 +31,11 @@ type InternalServerHandler = (
     request: HttpRequestResource,
     sender: RequestEventResource,
 ) => void;
-type OnErrorHandler = (error: any) => import("@kedo:int/std/web").Response | Promise<import("@kedo:int/std/web").Response>;
+type OnErrorHandler = (
+    error: any,
+) =>
+    | import("@kedo:int/std/web").Response
+    | Promise<import("@kedo:int/std/web").Response>;
 
 type InternalServerOptions = {
     hostname: string;
@@ -38,29 +43,56 @@ type InternalServerOptions = {
     key?: string;
     cert?: string;
     signal?: import("@kedo:op/web").InternalSignal;
-    handler: InternalServerHandler;
+    // handler: InternalServerHandler;
     onError?: OnErrorHandler;
 };
 
 declare module "@kedo:op/web" {
-
     class FetchClient {
         constructor();
     }
 
+    type HttpRequestEvent = {
+        request: HttpRequestResource;
+        sender: RequestEventResource;
+    };
+
     export function is_array_buffer_detached(buffer: ArrayBufferLike): boolean;
     export function parse_url_encoded_form(body: string): [string, string][];
-    export function serialize_url_encoded_form(data: [string, string][]): string;
+    export function serialize_url_encoded_form(
+        data: [string, string][],
+    ): string;
     export function encoding_for_label_no_replacement(label: string): string;
     export function op_send_signal(signal: InternalSignal): void;
     export function op_read_sync_readable_stream(
         reader: ReadableStreamResourceReader,
     ): Uint8Array | undefined;
+    export function op_read_async_request_event(
+        channel: NetworkBufferChannelReaderResource,
+        callback: OpStyleCallback<HttpRequestEvent | StreamError>,
+    ): void;
+    export function op_read_request_event(
+        channel: NetworkBufferChannelReaderResource,
+    ): HttpRequestEvent | StreamError;
+
+    // Unbounded stream resource
+    function op_close_unbounded_stream(
+        resource: UnboundedReadableStreamResource,
+    ): void;
+    export function op_write_sync_unbounded_stream(
+        resource: UnboundedReadableStreamResource,
+        chunk: Uint8Array,
+    ): number;
+    export function op_write_unbounded_stream(
+        resource: UnboundedReadableStreamResource,
+        chunk: Uint8Array,
+        callback: OpStyleCallback<number>,
+    ): void;
     /**
      * Write synchronously to the stream resource
-     * 
-     * @param resource 
-     * @param chunk 
+     *
+     * @param resource
+     * @param chunk
      * @returns number of bytes written if successful, -1 if the stream is closed, -2 if the stream is full
      */
     export function op_write_sync_readable_stream(
@@ -83,7 +115,10 @@ declare module "@kedo:op/web" {
     ): void;
     export function op_internal_start_server(
         options: InternalServerOptions,
-        callback: OpStyleCallback<string>,
+        callback: OpStyleCallback<{
+            reader: UnboundedReadableStreamResourceReader;
+            address: string;
+        }>,
     ): void;
     export function op_send_event_response(
         sender: RequestEventResource,
@@ -91,7 +126,7 @@ declare module "@kedo:op/web" {
     ): void;
     /**
      * Write to the stream resource
-     * 
+     *
      * @param resource
      * @param chunk
      * @param callback
@@ -113,7 +148,6 @@ declare module "@kedo:op/web" {
         blocking: boolean,
         callback: OpStyleCallback<void>,
     ): void;
-    export class ReadableStreamResourceReader { }
     export function encoding_decode(
         decoder: EncodingTextDecoder,
         buffer: ArrayBuffer,
@@ -152,14 +186,28 @@ declare module "@kedo:op/web" {
         constructor(hwm: number);
     }
 
+    export class ReadableStreamResourceReader {}
+
+    export class UnboundedReadableStreamResource {
+        constructor();
+    }
+
+    export class UnboundedReadableStreamResourceReader {}
+
     // http request resource
     export function op_http_request_method(_: HttpRequestResource): string;
     export function op_http_request_uri(_: HttpRequestResource): string;
-    export function op_http_request_headers(_: HttpRequestResource): [string, string][];
+    export function op_http_request_headers(
+        _: HttpRequestResource,
+    ): [string, string][];
     export function op_http_request_keep_alive(_: HttpRequestResource): boolean;
     export function op_http_request_redirect(_: HttpRequestResource): number;
-    export function op_http_request_redirect_count(_: HttpRequestResource): number;
-    export function op_http_request_body(_: HttpRequestResource): Uint8Array | ReadableStreamResource | null;
+    export function op_http_request_redirect_count(
+        _: HttpRequestResource,
+    ): number;
+    export function op_http_request_body(
+        _: HttpRequestResource,
+    ): Uint8Array | ReadableStreamResource | null;
 }
 
 declare module "@kedo:op/fs" {
@@ -169,8 +217,22 @@ declare module "@kedo:op/fs" {
     export function op_fs_read_dir_sync(path: string): DirEntry[];
     export function op_fs_write_file_sync(path: string, data: string): void;
     export function op_fs_remove_sync(path: string, recursive: boolean): void;
-    export function op_fs_read_file(path: string, callback: OpStyleCallback<string>): void;
-    export function op_fs_write_file(path: string, data: string, callback: OpStyleCallback<void>): void;
-    export function op_fs_read_dir(path: string, callback: OpStyleCallback<DirEntry>): void;
-    export function op_fs_remove(path: string, recursive: boolean, callback: OpStyleCallback<void>): void;
+    export function op_fs_read_file(
+        path: string,
+        callback: OpStyleCallback<string>,
+    ): void;
+    export function op_fs_write_file(
+        path: string,
+        data: string,
+        callback: OpStyleCallback<void>,
+    ): void;
+    export function op_fs_read_dir(
+        path: string,
+        callback: OpStyleCallback<DirEntry>,
+    ): void;
+    export function op_fs_remove(
+        path: string,
+        recursive: boolean,
+        callback: OpStyleCallback<void>,
+    ): void;
 }

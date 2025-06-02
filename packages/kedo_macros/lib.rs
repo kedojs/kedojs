@@ -55,6 +55,8 @@ pub fn js_class(attr: TokenStream, item: TokenStream) -> TokenStream {
     let has_finalizer = args.finalizer.is_some();
 
     let struct_name = &input.ident;
+    let generics = &input.generics;
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     let resource_type = &args.resource;
 
     let constructor_name = args.constructor.unwrap_or_else(|| {
@@ -151,10 +153,24 @@ pub fn js_class(attr: TokenStream, item: TokenStream) -> TokenStream {
         quote! { #finalizer_name }
     };
 
-    let expanded = quote! {
-        pub struct #struct_name {}
+    // let attrs = &input.attrs;
+    let vis = &input.vis;
+    let fields = match &input.data {
+        syn::Data::Struct(data_struct) => &data_struct.fields,
+        _ => {
+            return syn::Error::new_spanned(
+                &input,
+                "#[js_class] can only be used with structs",
+            )
+            .to_compile_error()
+            .into();
+        }
+    };
 
-        impl #struct_name {
+    let expanded = quote! {
+        #vis struct #struct_name #generics #fields
+
+       impl #impl_generics #struct_name #ty_generics #where_clause {
             pub const CLASS_NAME: &'static str = stringify!(#struct_name);
 
             #finalizer_impl

@@ -127,8 +127,8 @@ const createResponse = (
 };
 
 class Response {
-    [_headers]: Headers;
-    [_response]: InnerResponse;
+    [_headers]!: Headers;
+    [_response]!: InnerResponse;
 
     constructor(body?: BodyInit | null, init?: ResponseInit) {
         if ((body as any) === _illegalConstructor) return;
@@ -138,7 +138,7 @@ class Response {
         // 2. Set this’s headers to a new Headers object with this’s relevant realm, whose header list is this’s response’s header list and guard is "response".
         this[_headers] = new Headers(this[_response].headerList);
         // fillHeadersMapFrom(init?.headers, this[_headers], response.header_list);
-        const bodyWithType = body && body !== null ? extractBody(body) : undefined;
+        const bodyWithType = body && body !== null ? extractBody(body as any) : undefined;
         // 3. Perform initialize a response given this, init, and bodyWithType.
         initializeResponse(this, init, bodyWithType);
         mixinBody(this, _responseBody as any);

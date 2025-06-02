@@ -12,35 +12,18 @@ use std::{
 };
 
 #[derive(Debug)]
-pub struct OneshotSignalNotifier {
-    sender: Option<oneshot::Sender<()>>,
-}
-
-impl OneshotSignalNotifier {
-    fn new(sender: oneshot::Sender<()>) -> Self {
-        Self {
-            sender: Some(sender),
-        }
-    }
-
-    pub fn send(&mut self) -> Result<(), ()> {
-        self.sender.take().ok_or(())?.send(()).map_err(|_| ())
-    }
-}
-
-#[derive(Debug)]
 pub struct OneshotSignal {
     receiver: Option<oneshot::Receiver<()>>,
 }
 
 impl OneshotSignal {
-    pub fn new() -> (Self, OneshotSignalNotifier) {
+    pub fn new() -> (Self, oneshot::Sender<()>) {
         let (sender, receiver) = oneshot::channel();
         (
             Self {
                 receiver: Some(receiver),
             },
-            OneshotSignalNotifier::new(sender),
+            sender,
         )
     }
 
@@ -63,7 +46,7 @@ impl OneshotSignal {
 
 #[derive(Debug)]
 pub struct InternalSignal {
-    notifier: OneshotSignalNotifier,
+    sender: Option<oneshot::Sender<()>>,
     signal: Option<OneshotSignal>,
 }
 
@@ -127,9 +110,9 @@ impl InternalSignal {
     ) -> JSResult<JSValue> {
         let state = downcast_state(&ctx);
         let class = state.classes().get(InternalSignal::CLASS_NAME).unwrap();
-        let (oneshot_signal, notifier) = OneshotSignal::new();
+        let (oneshot_signal, sender) = OneshotSignal::new();
         let internal_signal = InternalSignal {
-            notifier,
+            sender: Some(sender),
             signal: Some(oneshot_signal),
         };
         let object =
@@ -147,12 +130,18 @@ fn op_send_signal(
     _: JSObject,
     args: &[JSValue],
 ) -> JSResult<JSValue> {
-    let resource_args = args
-        .get(0)
-        .ok_or_else(|| JSError::new_typ(&ctx, "Missing arguments").unwrap())?
-        .as_object()?;
+    let resource_args = match args.get(0) {
+        Some(value) => value.as_object()?,
+        None => return Err(JSError::new_typ(&ctx, "Missing arguments")?),
+    };
+
     if let Some(mut resource) = downcast_ref::<InternalSignal>(&resource_args) {
-        let _ = resource.notifier.send();
+        match resource.sender.take() {
+            Some(sender) => {
+                let _ = sender.send(());
+            }
+            _ => return Err(JSError::new_typ(&ctx, "Missing sender")?),
+        };
     }
 
     Ok(JSValue::undefined(&ctx))
@@ -181,7 +170,7 @@ mod tests {
         use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::Arc;
 
-        let (mut signal, mut notifier) = OneshotSignal::new();
+        let (mut signal, notifier) = OneshotSignal::new();
         let waker = noop_waker();
         let mut cx = Context::from_waker(&waker);
 
@@ -196,35 +185,9 @@ mod tests {
         assert_eq!(notified.load(Ordering::SeqCst), false);
         assert_eq!(future.as_mut().poll(&mut cx), Poll::Pending);
 
-        notifier.send().unwrap();
+        notifier.send(()).unwrap();
         assert_eq!(notified.load(Ordering::SeqCst), false);
         assert_eq!(future.as_mut().poll(&mut cx), Poll::Ready(()));
         assert_eq!(notified.load(Ordering::SeqCst), true);
     }
-
-    // #[tokio::test]
-    // async fn test_internal_signal() {
-    //     let mut rt = crate::tests::test_utils::new_runtime();
-    //     let result = rt.evaluate_module_from_source(
-    //         r#"
-    //         import { InternalSignal, op_send_signal } from '@kedo:op/web';
-    //         globalThis.signal = new InternalSignal();
-    //         setTimeout(() => { op_send_signal(signal) }, 100);
-    //     "#,
-    //         "index.js",
-    //         None,
-    //     );
-
-    //     assert!(result.is_ok());
-    //     let result = rt.evaluate_script("globalThis.signal", None);
-    //     assert!(result.is_ok());
-    //     let signal = result.unwrap().as_object().expect("Expected an object");
-    //     let internal_signal = downcast_ref::<InternalSignal>(&signal);
-    //     assert!(internal_signal.is_some());
-    //     let mut internal_signal = internal_signal.unwrap();
-    //     // now subscribe to the signal and wait for it
-    //     let result =
-    //         tokio::join!(internal_signal.signal.as_mut().unwrap().wait(), rt.idle());
-    //     assert!(result.0.is_ok());
-    // }
 }
