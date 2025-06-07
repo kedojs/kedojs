@@ -111,8 +111,13 @@ function runTests() {
       "Encoding input failed",
     );
   })();
-
-  console.log("All tests passed!");
 }
 
-runTests();
+const promises = [];
+for (let i = 0; i < 4000; i++) {
+  promises.push((async () => runTests())());
+}
+
+console.log("All tests passed!");
+
+await Promise.all(promises);

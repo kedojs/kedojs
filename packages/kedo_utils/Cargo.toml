@@ -1,0 +1,13 @@
+[package]
+name = "kedo_utils"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+repository.workspace = true
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+rust_jsc.workspace = true

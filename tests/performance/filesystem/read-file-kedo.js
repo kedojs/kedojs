@@ -1,11 +1,16 @@
+for (let i = 0; i < 4000; i++) {
+  const content = Kedo.readFileSync(
+    "/Users/kcaicedo/Documents/Projects/kedojs/local/examples/fs/data.txt",
+  );
 
+  Kedo.writeFileSync(
+    `/Users/kcaicedo/Documents/Projects/kedojs/local/examples/data-kedo-${i}.txt`,
+    content,
+  );
 
-for (let i = 0; i < 100; i++) {
-    const content = Kedo.readFileSync('./local/examples/fs/data.txt');
-    console.log(content);
-
-    Kedo.writeFileSync(`./local/examples/fs/mocks/data-kedo-${i}.txt`, content)
-    console.log("Content written to file");
-
-    Kedo.removeSync(`./local/examples/fs/mocks/data-kedo-${i}.txt`, false);
+  Kedo.removeSync(
+    `/Users/kcaicedo/Documents/Projects/kedojs/local/examples/data-kedo-${i}.txt`,
+  );
 }
+
+console.log("Multiple ReadFileSync test passed.\n");

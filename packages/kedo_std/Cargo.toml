@@ -1,0 +1,26 @@
+[package]
+name = "kedo_std"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+repository.workspace = true
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+tokio = { workspace = true, features = ["time"] }
+futures = { workspace = true, features = ["compat"] }
+thiserror.workspace = true
+hyper.workspace = true
+hyper-tls.workspace = true
+tokio-rustls.workspace = true
+hyper-util.workspace = true
+http-body-util.workspace = true
+base64.workspace = true
+percent-encoding.workspace = true
+bytes.workspace = true
+tokio-util.workspace = true
+async-compression.workspace = true
+tokio-native-tls.workspace = true

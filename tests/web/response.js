@@ -1,4 +1,5 @@
-import { deepStrictEqual, strictEqual, ok, throws } from "@kedo/assert"; // Replace with the correct path to your assertion library
+import { deepStrictEqual, ok, strictEqual, throws } from "@kedo/assert"; // Replace with the correct path to your assertion library
+import { ReadableStream } from "@kedo/stream";
 
 // Test Suite for the Response Class
 async function testResponseConstructor() {
@@ -17,6 +18,7 @@ async function testResponseConstructor() {
     "Headers should be an instance of Headers",
   );
   strictEqual(response.url, "", "URL should be empty");
+  strictEqual(response.headers.get("Content-Type"), "text/plain", "Content-Type should be text/plain");
 }
 
 async function testResponseBodyMethods() {
@@ -152,6 +154,21 @@ async function testResponseNullBodyStatus() {
   );
 }
 
+async function testResponseWithStream() {
+  // Test 12: Response with ReadableStream
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode("Hello,"));
+      controller.enqueue(new TextEncoder().encode(" world!"));
+      controller.close();
+    },
+  });
+
+  const response = new Response(stream);
+  const text = await response.text();
+  strictEqual(text, "Hello, world!", 'Text should be "Hello, world!"');
+}
+
 // Run All Tests
 async function runResponseTests() {
   console.log("Running Response tests...");
@@ -184,10 +201,13 @@ async function runResponseTests() {
     await testResponseNullBodyStatus();
     console.log("testResponseNullBodyStatus passed");
 
+    await testResponseWithStream();
+    console.log("testResponseWithStream passed");
+
     console.log("All Response tests passed");
   } catch (err) {
     console.error("Test failed:", err.message);
   }
 }
 
-runResponseTests();
+await runResponseTests();

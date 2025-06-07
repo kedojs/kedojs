@@ -531,4 +531,9 @@ assert.strictEqual(
   "Static canParse method - invalid URL",
 );
 
+// performance test
+for (let i = 0; i < 10000; i++) {
+  new URL("https://example.com/path");
+}
+
 console.log("All tests passed");

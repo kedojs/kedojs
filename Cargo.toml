@@ -1,22 +1,65 @@
-workspace = { members = ["bundler", "cli", "kedo-std"] }
-[package]
-name = "kedo_core"
+[workspace]
+members = [
+    "bundler", 
+    "cli", 
+    "kedo_js", 
+    "packages/kedo_console", 
+    "packages/kedo_runtime", 
+    "packages/kedo_fs", 
+    "packages/kedo_timers", 
+    "packages/kedo_utils", 
+    "packages/kedo_core", 
+    "packages/kedo_macros", 
+    "packages/kedo_std", 
+    "packages/kedo_web"
+]
+resolver = "2"
+
+[workspace.package]
 version = "0.1.0"
 authors = ["Kedo authors <ing.sys.kevincaicedo@gmail.com>"]
+license = "MIT"
 edition = "2021"
+repository = "https://github.com/kedojs/kedojs"
 
-[lib]
-path = "src/lib.rs"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[dependencies]
-rust_jsc = "0.2.4"
-# rust_jsc = { path = "/Users/kcaicedo/Documents/Projects/rust-jsc" }
-tokio = { version = "1", features = ["full"] }
-hyper = { version = "1", features = ["full"] }
+[workspace.dependencies]
+rust_jsc = { path = "/Users/kcaicedo/Documents/Projects/rust-jsc" }
+# rust_jsc = "0.3.0"
+tokio = { version = "1.44.1", features = ["full"] }
+tokio-util = { version = "0.7.14", features = ["codec", "io"] }
+hyper = { version = "1.6.0", features = ["full"] }
+hyper-util = { version = "0.1.10", features = ["full"] }
+hyper-tls = { version = "0.6.0" }
+async-compression = { version = "0.4.21", features = ["tokio", "brotli", "zlib", "gzip", "zstd"] }
+http-body-util = "0.1.3"
 form_urlencoded = "1.2.1"
-encoding_rs = "0.8.34"
-url = "2.5.2"
-bytes = "1.7.1"
-futures = "0.3.30"
+encoding_rs = "0.8.35"
+url = "2.5.4"
+bytes = "1.10.1"
+futures = "0.3.31"
+base64 = "0.22.1"
+percent-encoding = "2.3.1"
+thiserror = "2.0.3"
+tokio-rustls = "0.26.2"
+tokio-native-tls = "0.3.1"
+# socket2 = "0.5.9"
+
+# packages dependencies
+kedo_runtime = { path = "./packages/kedo_runtime" }
+kedo_console = { path = "./packages/kedo_console" }
+kedo_utils = { path = "./packages/kedo_utils" }
+kedo_core = { path = "./packages/kedo_core" }
+kedo_timers = { path = "./packages/kedo_timers" }
+kedo_fs = { path = "./packages/kedo_fs" }
+kedo_macros = { path = "./packages/kedo_macros" }
+kedo_std = { path = "./packages/kedo_std" }
+kedo_web = { path = "./packages/kedo_web" }
+
+#[profile.release]
+#opt-level = 3 # OR keep 3 for speed; "z" for size-optimized
+#lto = true
+#strip = true
+#debug = false
+#overflow-checks = false
+#panic = "abort"
+#codegen-units = 1

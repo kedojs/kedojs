@@ -1,7 +1,9 @@
 [package]
 name = "kedo-cli"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [[bin]]
 name = "kedo"
@@ -11,6 +13,6 @@ path = "main.rs"
 
 [dependencies]
 clap = { version = "4.5.3", features = ["derive"] }
-kedo_core = { path = "../" }
+kedo_runtime.workspace = true
 tokio = { version = "1", features = ["full"] }
 bundler = { path = "../bundler" }

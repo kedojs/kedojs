@@ -1,0 +1,25 @@
+[package]
+name = "kedo_web"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+repository.workspace = true
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+kedo_macros.workspace = true
+kedo_std.workspace = true
+kedo_core.workspace = true
+kedo_utils.workspace = true
+rust_jsc.workspace = true
+
+encoding_rs.workspace = true
+hyper.workspace = true
+futures.workspace = true
+bytes.workspace = true
+url.workspace = true
+form_urlencoded.workspace = true
+tokio.workspace = true

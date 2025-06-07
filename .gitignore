@@ -3,7 +3,18 @@
 local
 *.log
 *.log.*
+.DS_Store
 
 build/
 src/@std/dist/
-kedo-std/@std/dist/
+kedo_js/@std/dist/
+.build/
+
+tests/manual/*.txt
+.cargo/*
+.idea/
+log.txt
+logs.txt
+flamegraph.svg
+.flamegraph/*.svg
+cargo-flamegraph.stacks

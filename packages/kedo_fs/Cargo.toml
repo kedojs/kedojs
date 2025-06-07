@@ -1,0 +1,13 @@
+[package]
+name = "kedo_fs"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+rust_jsc.workspace = true
+kedo_core.workspace = true
+kedo_utils.workspace = true

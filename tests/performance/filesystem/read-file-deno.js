@@ -1,10 +1,16 @@
+for (let i = 0; i < 4000; i++) {
+  const content = Deno.readTextFileSync(
+    "/Users/kcaicedo/Documents/Projects/kedojs/local/examples/fs/data.txt",
+  );
 
-for (let i = 0; i < 100; i++) {
-    const content = Deno.readTextFileSync('./local/examples/fs/data.txt');
-    console.log(content);
+  Deno.writeTextFileSync(
+    `/Users/kcaicedo/Documents/Projects/kedojs/local/examples/mocks/data-${i}.txt`,
+    content,
+  );
 
-    Deno.writeTextFileSync(`./local/examples/fs/mocks/data-${i}.txt`, content)
-    console.log("Content written to file");
-
-    Deno.removeSync(`./local/examples/fs/mocks/data-${i}.txt`);
+  Deno.removeSync(
+    `/Users/kcaicedo/Documents/Projects/kedojs/local/examples/mocks/data-${i}.txt`,
+  );
 }
+
+console.log("Multiple ReadFileSync test passed.\n");
